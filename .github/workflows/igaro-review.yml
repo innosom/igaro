@@ -43,6 +43,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       DATABASE_URL: postgresql://igaro:igaro_test_only@localhost:5432/igaro_test
       MASTER_KEY: ci-test-master-key-not-a-secret-000000
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
     steps:
       - name: Find a build PR waiting for review
         id: pr
@@ -93,6 +94,7 @@ jobs:
           prompt: |
             You are the iGARO reviewer, acting for the repository owner, who is not available.
             Nobody is watching and nobody can answer questions: do the whole review now, start to finish.
+            This process exits when you end your turn: run any subagent in the FOREGROUND and wait for it.
             Review PR #${{ steps.pr.outputs.num }} in ${{ github.repository }}. You are on its branch
             `${{ steps.pr.outputs.branch }}`; the base is `main`.
 
