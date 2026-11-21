@@ -1,0 +1,52 @@
+# Lint, type-check and test. Does nothing until the monorepo (package.json) exists.
+# Note: PRs opened by the build loop use GitHub's built-in token, so this won't start on them
+# automatically. Click "Run workflow" or push to the branch. It always runs after a merge to main.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: igaro
+          POSTGRES_PASSWORD: igaro_test_only
+          POSTGRES_DB: igaro_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U igaro" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://igaro:igaro_test_only@localhost:5432/igaro_test
+      MASTER_KEY: ci-test-master-key-not-a-secret-000000
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: if [ -f package.json ]; then echo "has=1" >> "$GITHUB_OUTPUT"; else echo "::notice::No package.json yet, skipping"; fi
+      - uses: pnpm/action-setup@v4
+        if: steps.check.outputs.has == '1'
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.has == '1'
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: steps.check.outputs.has == '1'
+        run: pnpm install --frozen-lockfile
+      - if: steps.check.outputs.has == '1'
+        run: pnpm -r --if-present lint
+      - if: steps.check.outputs.has == '1'
+        run: pnpm -r --if-present typecheck
+      - if: steps.check.outputs.has == '1'
+        run: pnpm -r --if-present test

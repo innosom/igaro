@@ -1,0 +1,641 @@
+iGARO MVP Technical White Paper v1.0
+
+iGARO MVP Technical White Paper v1.0
+
+ ​Nov 21, 2026 · ​@INNOSOM
+iGARO is a multi-tenant SaaS platform that lets institutions issue, manage, suspend,
+revoke and publicly verify digital credentials. Every credential is cryptographically signed
+by the institution that issued it, so anyone can confirm it is authentic and still valid in
+seconds by scanning a QR code.
+This version replaces the v0 paper. The MVP has no blockchain layer: trust comes from
+institution digital signatures, published public keys and a tamper-evident audit log. The
+design keeps a clean slot for blockchain anchoring, which is planned as the first Phase 1
+feature.
+
+1. Problem and solution
+
+Physical ID cards and PDF certificates are easy to copy, edit or fake, and checking one
+usually means contacting the institution that issued it.
+For verifiers (employers, universities, hospitals, security officers), the question is: "Was
+this really issued by this institution, and is it still valid?" Today there is rarely a fast, reliable
+way to answer it.
+For institutions, there is no single system to issue credentials, manage holders, revoke or
+suspend credentials, keep a history, and offer a trusted public check.
+iGARO's answer is a managed credential lifecycle: create, issue, deliver, present, verify,
+then suspend, reinstate, revoke or reissue as needed. Each credential is signed with the
+institution's own key and carries a QR code. Scanning it opens iGARO's public verification
+page, which shows whether the credential is authentic, unaltered and currently valid.
+The product is a credential management and verification platform, not "a blockchain
+database for ID cards". The institution uses iGARO, the holder uses the digital credential,
+and the verifier uses the verification page.
+
+2. Actors and credential lifecycle
+
+iGARO has three actors. The institution (for example East Africa University) issues
+credentials through its dashboard. The credential holder (for example Ahmed Hassan)
+receives the credential and presents it. The verifier (an employer, university, hospital or
+security officer) scans the QR code to check it.
+
+                                                                                                                                                                                                                                            Page 1 of 15
+iGARO MVP Technical White Paper v1.0
+
+credential lifecycle · 5 states
+
+Suspension is for temporary situations, such as a student on leave, and can be undone.
+Revocation is for fraud or a rescinded degree, and is final, so a verifier can always trust a
+REVOKED result. If a credential was revoked by mistake, the institution issues a new
+credential linked to the revoked one; the revoked one stays revoked. Credentials are
+never deleted; they stay in the system for the audit trail.
+
+3. MVP scope
+
+The MVP proves one thing: an institution can issue a signed digital credential, and
+anyone can verify it, and see it suspended or revoked, by scanning a QR code.
+
+It targets one vertical first: education (universities, colleges, training centres), where
+fake certificates are the clearest fraud problem. It ships two templates, a Student/Staff ID
+card and a Certificate. Credential types are configuration, so hospitals and companies
+later need setup, not new code.
+
+Module                                In the MVP
+Authentication
+                                      Email and password (Argon2id), httpOnly cookie
+Roles                                 sessions, invite flow, password reset, login rate
+                                      limiting
+
+                                      Platform Admin, Institution Admin
+
+                                                                                         Page 2 of 15
+iGARO MVP Technical White Paper v1.0
+
+Module                                In the MVP
+Institutions
+                                      Create and suspend (platform admin); branding:
+Credential holders                    logo, two colours, card title; choice of which fields
+Credential types                      the public page shows; signing key generated and
+Issuance                              rotatable
+Bulk issuance
+Lifecycle                             Create and edit; photo upload to private storage
+
+Digital card                          ID card and certificate templates, each with its
+Holder delivery                       own attribute list
+Public verification
+Independent check                     Single issue, signed and active instantly
+Audit
+                                      CSV import plus a ZIP of photos named by holder
+Dashboard                             ID: validate, preview, issue as a background job
+Blockchain-ready hooks
+                                      Suspend, reinstate, revoke (final), reissue (also
+                                      after a mistaken revocation, as a new linked
+                                      credential); expiry calculated from the expiry date
+
+                                      Branded card as PNG and PDF, with QR code
+
+                                      Email with a private link to view and download the
+                                      card and the signed credential file
+
+                                      Verification page, signature proof, credential file
+                                      download, published public keys, rate limiting
+
+                                      Open-source command-line verifier that checks a
+                                      credential without calling iGARO
+
+                                      Append-only, hash-chained audit log with a signed,
+                                      timestamped daily head hash; verification log;
+                                      activity view
+
+                                      Counts by status; searchable, filterable credential
+                                      list
+
+                                      Anchoring interface (does nothing yet), event log
+                                      of every lifecycle change, anchor status field
+
+Not in the MVP: blockchain anchoring, a mobile app, holder accounts or wallets, DIDs and
+W3C Verifiable Credentials, Apple or Google Wallet passes, MFA, SSO, extra roles, custom
+verification domains, offline QR verification, AI or biometric checks, advanced analytics,
+and any token, NFT or DAO.
+
+                                                                                             Page 3 of 15
+iGARO MVP Technical White Paper v1.0
+
+4. Trust model without blockchain
+
+A verifier needs four answers: does the credential exist, did this institution issue it, has it
+been altered, and is it still valid. The MVP answers all four with standard cryptography and
+a well-designed database.
+
+What the v0 paper used blockchain     MVP mechanism
+for
+Proof the data wasn't altered         Each credential is signed with the institution's
+Proof of who issued it                Ed25519 key. Changing any byte breaks the
+                                      signature.
+Revocation status
+                                      One signing key pair per institution. Public keys are
+Tamper-proof history                  published at /i/{institution}/keys.json , so
+                                      anyone can check a signature without trusting
+Independent checking                  iGARO's database.
+
+                                      Worked out from the append-only, hash-chained
+                                      event log, never from a column anyone can edit. A
+                                      database rule blocks any change out of REVOKED,
+                                      even by an administrator.
+
+                                      Hash-chained audit log: each entry includes the
+                                      hash of the previous one, and every day iGARO
+                                      signs the latest hash and timestamps it externally
+                                      with OpenTimestamps, so even an insider who
+                                      recomputes the whole chain is caught.
+
+                                      Holders and verifiers can download the signed
+                                      credential file and check it with the open-source
+                                      verifier.
+
+Key protection. Each institution's private key is encrypted with AES-256-GCM under a
+master key held outside the database (a cloud key-management service in production). It
+is never stored or logged in plaintext. Keys carry an ID so they can be rotated; old keys
+stay published as retired so older credentials still verify. A leaked key is marked
+compromised, which makes every credential it signed fail verification.
+
+Known limits until Phase 1. Signatures prove authenticity independently of iGARO, but
+revocation status still depends on trusting iGARO's servers, and outside timestamps
+cover the audit log once a day rather than each credential. Phase 1 closes both by
+anchoring credential hashes and status on a public blockchain.
+
+                                      Page 4 of 15
+iGARO MVP Technical White Paper v1.0
+
+5. System architecture
+
+The MVP is a conventional web platform: one web app, one API, one PostgreSQL database
+and one background worker. Blockchain sits outside it as a future add-on.
+
+MVP system architecture
+
+The API is the only component that signs credentials. It unlocks an institution's private
+key with the master key only at the moment of signing. The worker handles slow tasks
+(emails, card rendering, CSV imports) through a job queue stored in PostgreSQL, so no
+extra queue server is needed. In Phase 1 the same worker gains an anchoring job that
+writes credential hashes and status to the blockchain.
+
+6. Credential data, hashing and signing
+
+Every credential stores one canonical payload: the exact data that is hashed and signed.
+Status, tokens and branding are kept outside it, so they can change without breaking the
+signature.
+
+                                                                                                                                                                                                                                            Page 5 of 15
+iGARO MVP Technical White Paper v1.0
+
+{                                                         "EAU20260125",
+   "schemaVersion": "igaro.credential.v1",
+   "credentialId": "<uuid v4>",
+   "credentialNumber": "EAU-2026-7K4M9QXT",
+   "institutionId": "<uuid>",
+   "issuerKeyId": "eau-2026-01",
+   "credentialType": "STUDENT_ID",
+   "holder": { "fullName": "Ahmed Hassan", "externalId":
+
+"photoSha256": "<hex>" },
+   "attributes": { "program": "Computer Science" },
+   "issuedAt": "2026-08-13T00:00:00Z",
+   "expiresAt": "2027-08-13T00:00:00Z",
+   "salt": "<32 random bytes, base64url>"
+
+}
+
+  1. Canonicalize the payload with RFC 8785 (JSON Canonicalization Scheme), so the
+     same data always produces the same bytes.
+
+  2. Hash it: dataHash = SHA-256(canonical payload) .
+  3. Sign it: signature = Ed25519(institution key, "igaro.credential.sig.v1:" +
+
+     dataHash) . The prefix stops the signature being reused in another context.
+  4. Store the payload, dataHash , signature and key ID with the credential.
+
+Three details matter:
+
+     Salt. A random 256-bit salt stops anyone guessing the hash from a name and an ID
+     number. Deleting the salt later makes the hash permanently unlinkable to the person,
+     which supports data-deletion requests.
+     Photo hash. The SHA-256 of the photo is signed, so swapping the photo is detected.
+     No in-place edits. Signed data never changes. A correction is a reissue: a new
+     credential is created and the old one becomes SUPERSEDED, pointing to the new one.
+
+The canonicalize, hash and sign code lives in one shared package, used by issuance,
+verification and the open-source verifier, and is covered by golden tests. Changing its
+output requires a new schemaVersion .
+
+7. Issuing a credential
+
+Issuance completes in under a second, with no waiting on any external network.
+What the institution admin does
+
+  1. Log in and open the dashboard.
+  2. Create or select the credential holder, and upload their photo.
+  3. Choose the credential type (ID card or certificate) and fill in its fields.
+
+                                                                                  Page 6 of 15
+iGARO MVP Technical White Paper v1.0
+
+  4. Click Issue. For many holders, upload a CSV file and a ZIP of photos instead, check the
+     preview, then issue the batch.
+
+What the system does, in one database transaction
+  1. Validate the fields against the credential type's attribute list.
+  2. Generate the internal ID, the printed credential number, a 128-bit verification token
+     and a separate holder token.
+  3. Build the canonical payload with a fresh salt and the photo hash.
+  4. Hash and sign it with the institution's active key.
+  5. Save the credential as ACTIVE, and write a lifecycle event and an audit-log entry
+     (audit entries are written one at a time per institution, using a database lock, so the
+     chain never forks).
+
+After the transaction (background jobs)
+  1. Render the branded card as PNG and PDF, with the QR code.
+  2. Email the holder a private link to view and download the card and the signed
+     credential file.
+  3. (Phase 1) Anchor the credential hash on the blockchain.
+
+8. Public verification
+
+The verification page is the most important screen in the MVP: it is what a verifier sees in
+the first seconds after scanning.
+QR code. The QR contains only a URL with a random 128-bit token, for example
+ https://verify.igaro.app/v/Xq3... , and never the credential data. The printed
+credential number is for people to read and is never used for lookups, so URLs cannot be
+guessed or enumerated. The card also says "Verify only at verify.igaro.app" to guard
+against fake QR codes.
+Checks, in order
+
+  1. Exists? Look up the token. Missing, or still a draft → NOT FOUND.
+  2. Unaltered and authentic? Recompute the hash from the stored payload and check
+
+     the institution's signature. Mismatch → VERIFICATION FAILED, and the operations
+     team is alerted.
+  3. Key still trusted? The signing key is marked compromised → VERIFICATION FAILED.
+  4. Status? REVOKED, SUSPENDED or SUPERSEDED → shown as such, with a link to the
+     replacement for SUPERSEDED.
+  5. Expired? The signed expiry date has passed → EXPIRED.
+
+                                                                                                                                                                                                                                            Page 7 of 15
+iGARO MVP Technical White Paper v1.0
+
+  6. Institution in good standing? Institution suspended on iGARO → VALID, with a
+     warning.
+
+  7. Otherwise → VERIFIED.
+
+Integrity is checked before status, so a tampered record can never appear as a clean
+"revoked" result. Every check is logged with a hashed IP address.
+
+Result                                What the verifier sees
+VERIFIED
+                                      ✓ Institution, holder name, credential type, status,
+VALID, WITH WARNING                   issue and expiry dates, plus "Signed by East Africa
+                                      University"
+SUSPENDED
+REVOKED                               Valid signature, but the institution's account is
+SUPERSEDED                            suspended
+EXPIRED
+NOT FOUND                             ✕ Temporarily suspended by the issuing institution
+
+VERIFICATION FAILED                   ✕ Revoked by the issuing institution; this is final
+
+                                      ✕ Replaced by a newer credential, with a link to it
+
+                                      ✕ The credential's validity period has ended
+                                      ✕ This credential does not exist in the iGARO
+                                      registry
+
+                                      ⚠ The data does not match the institution's
+                                      signature
+
+Each institution chooses which fields the page shows. Name and status always appear;
+photo, ID number and attributes are optional. The page also offers the signed credential
+file for download and links to the institution's public keys, so the signature can be
+checked independently. A Blockchain proof line is already part of the page design and
+will read "Not anchored" until Phase 1.
+
+9. Multi-tenancy, roles and security
+
+Tenant isolation. Institution A must never see Institution B's data. Every tenant table
+carries institution_id , and isolation is enforced in two independent layers:
+
+  1. The data-access layer takes the institution from the logged-in session, never from the
+     request.
+
+  2. PostgreSQL Row-Level Security blocks any query that reaches another tenant's rows,
+     even if the application has a bug.
+
+                                                                                            Page 8 of 15
+iGARO MVP Technical White Paper v1.0
+
+Automated tests check that every cross-tenant read or write returns "not found".
+Roles in the MVP
+
+Role                                  Can
+Platform Admin (iGARO staff)
+                                      Create and suspend institutions, invite their first
+Institution Admin                     admin, view platform statistics, manage system
+                                      settings
+
+                                      Manage holders and credential types, issue,
+                                      suspend, reinstate, revoke and reissue credentials,
+                                      customise branding, rotate the signing key, view
+                                      activity and audit logs
+
+Credential Manager and Viewer roles follow in Phase 1. There is no public sign-up: iGARO
+creates each institution and emails an invite to its admin.
+
+Security baseline
+
+     Passwords hashed with Argon2id; login rate limiting; sessions in httpOnly, Secure
+     cookies, never in browser storage.
+     Session, invite and reset tokens stored only as hashes.
+     Photos and logos in private object storage, served through short-lived signed links,
+     with EXIF metadata stripped.
+     Verification endpoints rate-limited per IP and per token.
+     Audit log append-only at database level (no update or delete rights), recording actor,
+     institution, action, target, IP and time, and hash-chained, with each day's head hash
+     signed and timestamped externally.
+     Credential status changes only through the event log; a database trigger refuses any
+     change out of REVOKED.
+     No private key, salt or token ever written to logs.
+
+A one-page threat model covers forged cards, insiders editing the database, a
+compromised server, URL enumeration, phishing QR codes, stolen admin accounts and
+stolen keys, and records which threats wait for Phase 1.
+
+Data protection. The public page shows holder names and, optionally, photos. Before a
+pilot, each institution collects holder consent and signs a data-processing agreement
+with iGARO. Under laws such as Kenya's Data Protection Act 2019, the institution is the
+data controller and iGARO the data processor.
+
+                                                                                           Page 9 of 15
+iGARO MVP Technical White Paper v1.0
+
+10. Data model
+
+PostgreSQL, accessed through Prisma. Every institution-owned row, including in users ,
+is tagged with its institution; only platform-admin accounts and sessions sit outside
+tenants. Rows are scoped by institution_id and protected by Row-Level Security.
+
+Table                                 Key columns                         Purpose
+                                                                          Tenant and its branding
+institutions                          name, slug, logo, primary and       Signing keys, rotatable
+institution_keys                      secondary colour, card title,
+                                      public-field settings, status       Admin accounts
+users                                                                     Login sessions
+sessions                              kid, public key, encrypted          Invite-only onboarding
+invites                               private key, status (active,        Templates as configuration
+credential_types                      retired, compromised), created      People who receive credentials
+credential_holders                    and retired dates                   The signed credential
+credentials
+                                      institution_id (empty for           Lifecycle event log; the Phase 1
+credential_events                     platform admins), email, name,      blockchain worker reads it
+verification_logs                     password hash, role, status         Every public check
+
+                                      token hash, user, expiry, IP, user
+                                      agent
+
+                                      institution, email, role, token
+                                      hash, expiry, used date
+
+                                      code, name, kind (ID card or
+                                      certificate), attribute list,
+                                      default validity
+
+                                      full name, external ID, email,
+                                      photo key, photo hash
+
+                                      holder, type, credential number,
+                                      status, payload, data hash, key
+                                      ID, signature, issue and expiry
+                                      dates, verification token, holder
+                                      token, superseded-by, anchor
+                                      status
+
+                                      credential, type (issued,
+                                      suspended, reinstated, revoked,
+                                      reissued), data, anchored date
+
+                                      credential, result, hashed IP,
+                                      user agent, time
+
+                                                                          Page 10 of 15
+iGARO MVP Technical White Paper v1.0
+
+Table                                 Key columns                       Purpose
+
+audit_logs                            actor, action, target, metadata,  Append-only, hash-chained
+                                      IP, time, previous hash, entry    history
+                                      hash
+
+The anchor_status column (always "not anchored" in the MVP) and the
+credential_events table are the database hooks for Phase 1. That phase adds
+chain_operations and anchors tables and changes nothing else.
+
+11. API
+
+A versioned REST API under /api/v1 . Tenant endpoints always act on the logged-in
+admin's own institution. There are no public blockchain endpoints; in Phase 1, anchoring
+happens as a background side effect of lifecycle actions.
+
+Area             Endpoints                                              Who
+                                                                        Admins
+Auth             POST /auth/login , POST /auth/logout , GET
+                 /auth/me , POST /auth/invites/accept , POST            Platform admin
+                                                                        Institution admin
+                 /auth/password-reset
+                                                                        Institution admin
+Institutions     GET and POST /institutions , PATCH                     Institution admin
+                                                                        Institution admin
+                 /institutions/:id/status
+                                                                        Institution admin
+Own institution  GET and PATCH /institution , POST                      Anyone, rate-
+                 /institution/logo , POST                               limited
+
+                 /institution/keys/rotate
+
+Holders          GET and POST /holders , GET and PATCH
+                 /holders/:id , POST /holders/:id/photo
+
+Credential types GET and POST /credential-types
+
+Credentials      GET and POST /credentials , GET
+                 /credentials/:id , POST
+                 /credentials/:id/suspend , /reinstate ,
+                 /revoke , /reissue , POST
+                 /credentials/import (CSV), GET
+                 /credentials/:id/card.pdf and card.png
+
+Dashboard and    GET /dashboard/stats , GET /audit-logs , GET
+audit
+                 /audit-logs/verify-chain
+
+Public           GET /verify/:verificationToken , GET
+verification
+                 /verify/:verificationToken/credential.json
+
+                                                                             Page 11 of 15
+iGARO MVP Technical White Paper v1.0
+
+Area          Endpoints                                                 Who
+Public keys
+Holder        GET /i/:institution/keys.json                             Anyone
+              GET /holder/:holderToken
+                                                                        Holder, via the
+                                                                        private link
+
+Revoke and suspend require a reason, which is stored in the audit log.
+
+12. Technology stack and repository structure
+
+Layer         Choice                                Why
+Web app       Next.js, React, TypeScript, Tailwind  One app for the dashboard,
+API           CSS                                   verification page and holder page
+Database      Node.js, TypeScript, Fastify or       Same language as the web app and
+Background    Express                               the shared core
+jobs          PostgreSQL with Row-Level             Relational data, strong tenant
+Cryptography  Security, Prisma ORM                  isolation
+File storage  pg-boss (runs on PostgreSQL)          Emails, card rendering, CSV
+Email                                               import, Phase 1 anchoring, without
+              Node.js built-in crypto: Ed25519,     running Redis
+QR codes      SHA-256, AES-256-GCM                  No third-party crypto dependency
+Local setup   S3-compatible (MinIO locally)
+              Resend or Amazon SES (Mailpit         Photos, logos, rendered cards
+              locally); sent from a verified        Invites, password resets,
+              domain (SPF and DKIM) so it           credential delivery
+              doesn't land in spam
+              Standard QR library                   Verification URLs only
+              Docker Compose: PostgreSQL,           Whole stack on one laptop
+              Mailpit, MinIO
+
+The code lives in one repository (monorepo), so the security-critical hashing and signing
+code is written once and shared:
+
+                                                                        Page 12 of 15
+iGARO MVP Technical White Paper v1.0
+
+igaro/                                Next.js: dashboard, public verification page, holder
+├── apps/                             REST API
+│ ├── web/                            background jobs (email, cards, CSV import; Phase 1:
+page
+│ ├── api/                            canonicalize, hash, sign and verify; lifecycle rules;
+│ └── worker/                         Prisma schema, migrations, Row-Level Security
+anchoring)                            open-source independent verifier
+├── packages/                         architecture, threat model, API, decision records
+│ ├── core/
+anchoring interface
+│ └── db/
+policies
+├── tools/verify-cli/
+└── docs/
+
+Phase 1 adds packages/contracts/ for the smart contract.
+
+13. Delivery plan
+
+About 5 weeks for 2 experienced developers (about 8 weeks for one), about 2 weeks
+less than a build with blockchain, and without its riskiest parts (smart contract, wallets,
+gas fees, network outages).
+
+  1. Week 1, foundations: repository, automated checks, Docker Compose, database
+     schema with Row-Level Security, login and invites, threat model, decision records.
+
+  2. Week 2, institutions and holders: institutions, branding, signing keys, holders, photo
+     storage, credential types.
+
+  3. Week 3, the trust core: canonicalize, hash and sign with golden tests; issuance;
+     lifecycle; event log; hash-chained audit log with a signed daily head hash.
+
+  4. Week 4, verification: public verification page, proof panel, public keys, signed
+     credential download, open-source verifier, rate limiting.
+
+  5. Week 5, delivery and polish: card rendering (HTML card first, then PNG and PDF
+     through headless Chrome, with QR), holder email and link, CSV bulk import,
+     dashboard figures, hardening, staging deployment, demo script.
+
+Each module has written acceptance criteria ("given …, when …, then …"), and the full
+demo runs as an automated test so it never breaks before a meeting.
+
+14. Roadmap
+
+Blockchain is the first feature after the MVP, not a rewrite. It plugs into hooks the MVP
+already has, and every credential issued during the MVP is backfilled.
+
+                                                          Page 13 of 15
+iGARO MVP Technical White Paper v1.0
+
+Phase                                 Goal                            Main features
+MVP                                   Prove issue, verify and revoke
+Phase 1: blockchain and               with signatures                 Everything in section 3
+pilot-ready                           Independent trust; first
+                                      paying institutions             Smart contract on a low-cost
+Phase 2: standards and                                                Ethereum layer-2 network
+scale                                 Interoperability                (Base or Polygon); credential
+                                                                      hashes batched into one
+Phase 3: ecosystem, if                Network effects                 transaction (Merkle tree),
+the market asks                                                       costing fractions of a cent
+                                                                      each; iGARO pays gas through
+                                                                      a relayer; backfill of MVP
+                                                                      credentials; "Anchored on
+                                                                      blockchain" proof on the
+                                                                      verification page; key
+                                                                      management service; MFA;
+                                                                      Credential Manager and
+                                                                      Viewer roles; Apple and Google
+                                                                      Wallet passes; custom
+                                                                      verification domains; data-
+                                                                      protection tools; billing
+
+                                                                      W3C Verifiable Credentials
+                                                                      export; W3C Bitstring Status
+                                                                      List; did:web identifiers for
+                                                                      institutions; offline QR
+                                                                      verification and a verifier app;
+                                                                      holder accounts and wallets;
+                                                                      verifier API; SSO; student and
+                                                                      HR system integrations;
+                                                                      analytics
+
+                                                                      Multi-chain anchoring; zero-
+                                                                      knowledge proofs and
+                                                                      selective disclosure; cross-
+                                                                      institution trust registry
+
+Off the roadmap entirely: any iGARO token, NFTs or DAO. They add regulatory risk and
+confuse institutional buyers.
+
+15. MVP success criteria
+
+The MVP is done when all of these can be demonstrated, without explaining the code:
+
+                                                                      Page 14 of 15
+iGARO MVP Technical White Paper v1.0
+
+     The platform admin creates an institution and invites its admin.
+     The institution admin logs in and customises branding.
+     The admin creates a holder, uploads a photo, and issues a credential with a unique
+     number, a signature and a QR code.
+     The holder receives an email with the card and the signed credential file.
+     Scanning the QR code shows VERIFIED, signed by the institution.
+     Suspend → SUSPENDED; reinstate → VERIFIED; revoke → REVOKED, and a revoked
+     credential cannot be reinstated.
+     Reissuing marks the old credential SUPERSEDED, with a link to the new one.
+     Editing any signed field directly in the database makes verification return
+     VERIFICATION FAILED.
+     Changing a revoked credential's status directly in the database is refused, and
+     verification still shows REVOKED.
+     Editing or deleting an audit-log entry is detected even if every later hash is
+     recomputed, by checking the chain against the signed daily head hash.
+     The open-source verifier checks a downloaded credential's signature without calling
+     iGARO.
+     A CSV import of 500 holders with photos completes, and each holder gets an email.
+     Institution A cannot read or change Institution B's data (automated tests pass).
+     Verification responds in under 300 ms for 95% of requests, and verification URLs
+     cannot practically be guessed.
+     No private key, salt or token appears in any log.
+
+                                                                                                                                                                                                                                          Page 15 of 15
+

@@ -1,0 +1,121 @@
+# iGARO autonomous build loop.
+# Each run completes ONE task from docs/plan.md using the igaro-* subagents and opens a PR.
+# It pauses while a previous build PR is still open, so you review/merge at your own pace.
+# Triggers: every 6 hours, on every merge to main (so the next task starts right away), or manually.
+name: iGARO build loop
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  push:
+    branches: [main]
+    paths-ignore:
+      - ".github/**"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Optional: a task ID from docs/plan.md (e.g. T-007) or a free-text instruction"
+        required: false
+
+concurrency:
+  group: igaro-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: igaro
+          POSTGRES_PASSWORD: igaro_test_only
+          POSTGRES_DB: igaro_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U igaro" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DATABASE_URL: postgresql://igaro:igaro_test_only@localhost:5432/igaro_test
+      # Test-only value so key-wrapping tests can run in CI. Never use it outside tests.
+      MASTER_KEY: ci-test-master-key-not-a-secret-000000
+    steps:
+      - name: Skip if a build PR is still waiting for review
+        id: gate
+        run: |
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length')
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+          if [ "$open" != "0" ] && [ -z "${{ github.event.inputs.task }}" ]; then
+            echo "::notice::A build PR is still open. Merge or close it and the loop continues."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
+        with:
+          node-version: 22
+
+      - name: Ensure the build label exists
+        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
+        run: gh label create igaro-build --color 5319e7 --description "Opened by the iGARO build loop" 2>/dev/null || true
+
+      - name: Run the iGARO agent team
+        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --max-turns 200
+            --allowedTools "Read,Write,Edit,Glob,Grep,Task,Agent,TodoWrite,Bash(git:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(pnpm:*),Bash(npx:*),Bash(node:*),Bash(psql:*),Bash(pdftotext:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(sed:*)"
+          prompt: |
+            You are the orchestrator of the iGARO agent team, running unattended in GitHub Actions.
+            Repository: ${{ github.repository }}. Read CLAUDE.md first; its invariants are binding.
+            The specialist agents are defined in .claude/agents/. Delegate to them as subagents
+            (igaro-architect, igaro-platform, igaro-crypto-core, igaro-api, igaro-worker, igaro-web,
+            igaro-qa, igaro-security-reviewer). If a subagent type is not available, read its .md file and
+            follow it yourself.
+
+            Requested task (may be empty): "${{ github.event.inputs.task }}"
+
+            Do exactly ONE unit of work this run:
+            1. If docs/plan.md does not exist, use igaro-architect to write docs/architecture.md,
+               docs/threat-model.md, docs/adr/0001-*.md, docs/api.md, docs/acceptance/*.md and docs/plan.md.
+               plan.md must be a checklist of small tasks in build order, one per line, in this exact form:
+               `- [ ] T-001 [owner: igaro-platform] [deps: none] Short description`
+               That is the whole unit of work for this run.
+            2. Otherwise pick the requested task, or else the first unchecked task whose deps are all checked.
+               Delegate it to its owner agent. Make sure the code builds and its tests pass
+               (Postgres is available at $DATABASE_URL). Then run igaro-security-reviewer on the change;
+               fix every Critical and High finding with the owner agent and re-review.
+               When the milestone's code exists, also have igaro-qa add the matching tests.
+            3. Tick the task in docs/plan.md (`- [x]`) and add a one-line note under it.
+            4. Create branch `igaro/<task-id>-<short-slug>` (for step 1 use `igaro/T-000-plan`), commit with a
+               clear message, push it, and open a PR with:
+               `gh pr create --base main --label igaro-build --title "<task-id>: <title>" --body "<summary>"`
+               The body must contain: what was built, how it was tested (with results), the security
+               reviewer's verdict and any remaining Medium/Low findings, and open questions for the owner.
+
+            Rules:
+            - Never push to main. Never modify anything under .github/ (the token cannot); if CI needs a
+              change, describe it in docs/ci-proposals.md instead.
+            - Never commit secrets. Use only test values. Never weaken a CLAUDE.md invariant to make a test pass.
+            - If you are blocked (missing decision, conflicting spec), still open the PR with what you have and
+              put the question at the top of its body, prefixed "BLOCKED:".
