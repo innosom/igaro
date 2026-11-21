@@ -1,0 +1,135 @@
+# iGARO reviewer agent: reviews each build PR in place of the owner.
+# Every 30 minutes it looks for an open PR labelled igaro-build (and not needs-human).
+# It runs the tests, reviews the change against CLAUDE.md, fixes small problems on the PR branch,
+# and writes a verdict. A plain script (not the agent) then merges only if:
+#   the verdict is APPROVE, the tests pass, and the PR is not marked BLOCKED.
+# After merging it starts the build loop for the next task.
+# Otherwise it labels the PR needs-human and the loop waits for you.
+# Pause it: Settings > Secrets and variables > Actions > Variables > IGARO_AUTO_REVIEW = false
+name: iGARO reviewer
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: igaro-review
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  id-token: write
+
+jobs:
+  review:
+    if: vars.IGARO_AUTO_REVIEW != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: igaro
+          POSTGRES_PASSWORD: igaro_test_only
+          POSTGRES_DB: igaro_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U igaro" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DATABASE_URL: postgresql://igaro:igaro_test_only@localhost:5432/igaro_test
+      MASTER_KEY: ci-test-master-key-not-a-secret-000000
+    steps:
+      - name: Find a build PR waiting for review
+        id: pr
+        run: |
+          num=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open \
+                --json number,labels --jq '[.[] | select(all(.labels[]; .name != "needs-human"))][0].number // empty' 2>/dev/null || true)
+          echo "num=$num" >> "$GITHUB_OUTPUT"
+          if [ -z "$num" ]; then echo "::notice::Nothing to review."; exit 0; fi
+          gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json headRefName --jq '"branch=" + .headRefName' >> "$GITHUB_OUTPUT"
+          gh label create needs-human --repo "$GITHUB_REPOSITORY" --color d93f0b --description "The reviewer agent wants the owner to decide" 2>/dev/null || true
+
+      - uses: actions/checkout@v4
+        if: steps.pr.outputs.num != ''
+        with:
+          ref: ${{ steps.pr.outputs.branch }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        if: steps.pr.outputs.num != ''
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        if: steps.pr.outputs.num != ''
+        with:
+          node-version: 22
+
+      - name: Reviewer agent
+        if: steps.pr.outputs.num != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          show_full_output: true
+          claude_args: |
+            --max-turns 150
+            --allowedTools "Read,Write,Edit,Glob,Grep,Task,Agent,TodoWrite,Bash(git:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(pnpm:*),Bash(npx:*),Bash(node:*),Bash(psql:*),Bash(ls:*),Bash(cat:*)"
+          prompt: |
+            You are the iGARO reviewer, acting for the repository owner, who is not available.
+            Nobody is watching and nobody can answer questions: do the whole review now, start to finish.
+            Review PR #${{ steps.pr.outputs.num }} in ${{ github.repository }}. You are on its branch
+            `${{ steps.pr.outputs.branch }}`; the base is `main`.
+
+            1. Read CLAUDE.md, docs/plan.md and the PR (`gh pr view ${{ steps.pr.outputs.num }}`,
+               `git diff origin/main...HEAD`). Check that the change does what its plan task says, and
+               nothing outside its scope.
+            2. Review it as igaro-security-reviewer would (see .claude/agents/igaro-security-reviewer.md):
+               every CLAUDE.md invariant, secrets, tenancy, crypto, tests that really test something.
+            3. If package.json exists: `pnpm install`, then `pnpm -r --if-present lint`, `typecheck`, `test`
+               (Postgres is at $DATABASE_URL). Every one must pass.
+            4. Small, clear fixes (failing test, lint, missing check, an invariant slip): fix them yourself on
+               this branch, commit, `git push`, and re-run step 3. Never touch .github/. Never weaken an
+               invariant or delete a test to make it pass.
+            5. Write your decision to the file `.igaro-review-verdict` (do not commit it), first line exactly
+               `APPROVE` or `REJECT`, then the reasons. APPROVE only if: tests pass (or there is no code yet),
+               no Critical/High findings remain, no CLAUDE.md invariant is broken, and the PR body has no
+               open "BLOCKED:" question that needs the owner. Product decisions the white paper does not
+               settle → REJECT so the owner decides. When in doubt, REJECT.
+            6. Post your review: `gh pr comment ${{ steps.pr.outputs.num }} --body "<verdict, findings,
+               fixes you made, test results>"`.
+
+      - name: Re-run the tests independently
+        id: tests
+        if: steps.pr.outputs.num != ''
+        run: |
+          git fetch -q origin "${{ steps.pr.outputs.branch }}" && git checkout -q -B review-check "origin/${{ steps.pr.outputs.branch }}"
+          if [ ! -f package.json ]; then echo "ok=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if pnpm install && pnpm -r --if-present lint && pnpm -r --if-present typecheck && pnpm -r --if-present test; then
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge or hand to the owner
+        if: steps.pr.outputs.num != ''
+        run: |
+          num="${{ steps.pr.outputs.num }}"
+          verdict=$(head -1 .igaro-review-verdict 2>/dev/null | tr -d '\r ' || true)
+          body=$(gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          reason=""
+          [ "$verdict" = "APPROVE" ] || reason="the reviewer agent did not approve"
+          [ "${{ steps.tests.outputs.ok }}" = "1" ] || reason="tests failed when re-run independently"
+          grep -q "BLOCKED:" <<<"$body" && reason="the PR has an open BLOCKED question"
+          if [ -n "$reason" ]; then
+            gh pr edit "$num" --repo "$GITHUB_REPOSITORY" --add-label needs-human
+            gh pr comment "$num" --repo "$GITHUB_REPOSITORY" --body "Not merged: $reason. Labelled needs-human; the build loop waits until the owner merges or closes this PR."
+            exit 0
+          fi
+          gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --squash --delete-branch
+          gh workflow run igaro-build.yml --repo "$GITHUB_REPOSITORY" --ref main

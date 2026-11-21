@@ -65,8 +65,10 @@ custom domains, offline QR, AI/biometrics, advanced analytics, any token/NFT/DAO
 
 ## Running on GitHub
 The team runs unattended in GitHub Actions (`.github/workflows/igaro-build.yml`): each run does one task from
-`docs/plan.md` and opens a PR labelled `igaro-build`, and the owner reviews and merges it. Agents never push to `main`,
+`docs/plan.md` and opens a PR labelled `igaro-build`, and the reviewer agent reviews and merges it. Agents never push to `main`,
 never edit `.github/` (put CI changes in `docs/ci-proposals.md`), and never commit secrets.
+The reviewer agent (`igaro-review.yml`, every 30 min) reviews and tests each build PR, fixes small issues, and merges only
+when it approves and tests pass; otherwise it labels the PR `needs-human` for the owner.
 `@claude` in an issue or PR comment reaches the team interactively (`claude.yml`).
 
 Build order (5 weeks): W1 platform+auth+threat model → W2 institutions/keys/holders/types → W3 crypto core, issuance,
