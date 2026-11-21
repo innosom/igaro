@@ -1,16 +1,13 @@
 # iGARO autonomous build loop.
 # Each run completes ONE task from docs/plan.md using the igaro-* subagents and opens a PR.
 # It pauses while a previous build PR is still open, so you review/merge at your own pace.
-# Triggers: every 6 hours, on every merge to main (so the next task starts right away), or manually.
+# Triggers: every 6 hours, manually, or by the reviewer workflow (after a merge, or whenever no build PR is open).
+# (claude-code-action does not support the push event.)
 name: iGARO build loop
 
 on:
   schedule:
     - cron: "0 */6 * * *"
-  push:
-    branches: [main]
-    paths-ignore:
-      - ".github/**"
   workflow_dispatch:
     inputs:
       task:

@@ -50,7 +50,17 @@ jobs:
           num=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open \
                 --json number,labels --jq '[.[] | select(all(.labels[]; .name != "needs-human"))][0].number // empty' 2>/dev/null || true)
           echo "num=$num" >> "$GITHUB_OUTPUT"
-          if [ -z "$num" ]; then echo "::notice::Nothing to review."; exit 0; fi
+          if [ -z "$num" ]; then
+            any=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length' 2>/dev/null || echo 1)
+            busy=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow igaro-build.yml --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)
+            if [ "$any" = "0" ] && [ "$busy" = "0" ]; then
+              echo "::notice::No build PR open and the builder is idle: starting the next task."
+              gh workflow run igaro-build.yml --repo "$GITHUB_REPOSITORY" --ref main
+            else
+              echo "::notice::Nothing to review."
+            fi
+            exit 0
+          fi
           gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json headRefName --jq '"branch=" + .headRefName' >> "$GITHUB_OUTPUT"
           gh label create needs-human --repo "$GITHUB_REPOSITORY" --color d93f0b --description "The reviewer agent wants the owner to decide" 2>/dev/null || true
 
