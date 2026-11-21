@@ -5,7 +5,8 @@ Format: `- [ ] T-NNN [owner: agent] [deps: ids|none] description`. Tick the box 
 Acceptance criteria per milestone: `docs/acceptance/`.
 
 ## W1 Platform, auth, threat model
-- [ ] T-001 [owner: igaro-platform] [deps: none] Monorepo scaffold (pnpm workspaces, TS config, lint, type-check, test scripts, empty app/package skeletons)
+- [x] T-001 [owner: igaro-platform] [deps: none] Monorepo scaffold (pnpm workspaces, TS config, lint, type-check, test scripts, empty app/package skeletons)
+  - Done: pnpm workspace scaffold with 6 skeleton packages; build, typecheck, lint, test pass. Web is a TS placeholder (Next.js comes with T-035). Follow-ups: pnpm onlyBuiltDependencies allowlist, exclude tests from build tsconfig.
 - [ ] T-002 [owner: igaro-platform] [deps: T-001] Docker Compose (Postgres, Mailpit, MinIO) and .env.example
 - [ ] T-003 [owner: igaro-platform] [deps: T-001] Draft CI workflow proposal in docs/ci-proposals.md (lint, type-check, tests)
 - [ ] T-004 [owner: igaro-platform] [deps: T-002] Prisma schema for all v1.0 tables (incl. credential_events, audit_logs, anchor_status)
