@@ -51,7 +51,9 @@ jobs:
       - name: Skip if a build PR is still waiting for review
         id: gate
         run: |
-          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length')
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length' 2>/dev/null || true)
+          case "$open" in ''|*[!0-9]*) open=0 ;; esac
+          echo "Open build PRs: $open"
           echo "open=$open" >> "$GITHUB_OUTPUT"
           if [ "$open" != "0" ] && [ -z "${{ github.event.inputs.task }}" ]; then
             echo "::notice::A build PR is still open. Merge or close it and the loop continues."
