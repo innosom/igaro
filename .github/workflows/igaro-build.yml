@@ -84,11 +84,16 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          show_full_output: true
+          display_report: true
           claude_args: |
             --max-turns 200
             --allowedTools "Read,Write,Edit,Glob,Grep,Task,Agent,TodoWrite,Bash(git:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(pnpm:*),Bash(npx:*),Bash(node:*),Bash(psql:*),Bash(pdftotext:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(sed:*)"
           prompt: |
             You are the orchestrator of the iGARO agent team, running unattended in GitHub Actions.
+            Nobody is watching this run and nobody can answer questions. Do not stop to summarise, plan
+            or ask for confirmation: carry out the steps below yourself, start to finish, now. The run only
+            counts as done when `gh pr create` has printed a PR URL; end your final message with that URL.
             Repository: ${{ github.repository }}. Read CLAUDE.md first; its invariants are binding.
             The specialist agents are defined in .claude/agents/. Delegate to them as subagents
             (igaro-architect, igaro-platform, igaro-crypto-core, igaro-api, igaro-worker, igaro-web,
