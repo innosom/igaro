@@ -71,15 +71,20 @@ jobs:
           ref: ${{ steps.pr.outputs.branch }}
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-        if: steps.pr.outputs.num != ''
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         if: steps.pr.outputs.num != ''
         with:
           node-version: 22
+      - name: Set up pnpm (follows packageManager in package.json when present)
+        if: steps.pr.outputs.num != ''
+        run: |
+          if grep -q '"packageManager"' package.json 2>/dev/null; then
+            npm install -g corepack@latest && corepack enable
+          else
+            npm install -g pnpm@9.15.9
+          fi
+          pnpm --version
 
       - name: Reviewer agent
         if: steps.pr.outputs.num != ''

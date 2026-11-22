@@ -23,7 +23,7 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write
-  actions: read
+  actions: write
 
 jobs:
   build:
@@ -63,15 +63,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
         with:
           node-version: 22
+      - name: Set up pnpm (follows packageManager in package.json when present)
+        if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
+        run: |
+          if grep -q '"packageManager"' package.json 2>/dev/null; then
+            npm install -g corepack@latest && corepack enable
+          else
+            npm install -g pnpm@9.15.9
+          fi
+          pnpm --version
 
       - name: Ensure the build label exists
         if: steps.gate.outputs.open == '0' || github.event.inputs.task != ''
@@ -128,3 +133,8 @@ jobs:
             - Never commit secrets. Use only test values. Never weaken a CLAUDE.md invariant to make a test pass.
             - If you are blocked (missing decision, conflicting spec), still open the PR with what you have and
               put the question at the top of its body, prefixed "BLOCKED:".
+
+      # GitHub's schedules are unreliable on new repos, so hand the new PR to the reviewer right away.
+      - name: Start the reviewer agent
+        if: always() && (steps.gate.outputs.open == '0' || github.event.inputs.task != '')
+        run: gh workflow run igaro-review.yml --repo "$GITHUB_REPOSITORY" --ref main || true
