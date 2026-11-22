@@ -7,7 +7,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 ## W1 Platform, auth, threat model
 - [x] T-001 [owner: igaro-platform] [deps: none] Monorepo scaffold (pnpm workspaces, TS config, lint, type-check, test scripts, empty app/package skeletons)
   - Done: pnpm workspace scaffold with 6 skeleton packages; build, typecheck, lint, test pass. Web is a TS placeholder (Next.js comes with T-035). Follow-ups: pnpm onlyBuiltDependencies allowlist, exclude tests from build tsconfig.
-- [ ] T-002 [owner: igaro-platform] [deps: T-001] Docker Compose (Postgres, Mailpit, MinIO) and .env.example
+- [x] T-002 [owner: igaro-platform] [deps: T-001] Docker Compose (Postgres, Mailpit, MinIO) and .env.example
+  - Done: docker-compose.yml (Postgres 16, Mailpit, MinIO + private bucket init), .env.example, docs/dev-setup.md. Not run (no Docker in CI runner). Follow-ups: pin image versions; apps must use APP_DATABASE_URL and fail on superuser/placeholder MASTER_KEY.
 - [ ] T-003 [owner: igaro-platform] [deps: T-001] Draft CI workflow proposal in docs/ci-proposals.md (lint, type-check, tests)
 - [ ] T-004 [owner: igaro-platform] [deps: T-002] Prisma schema for all v1.0 tables (incl. credential_events, audit_logs, anchor_status)
 - [ ] T-005 [owner: igaro-platform] [deps: T-004] Initial migration with RLS policies per tenant table and restricted app DB role
