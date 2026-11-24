@@ -13,7 +13,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: proposal P-001 in docs/ci-proposals.md. Docs only, no .github changes; owner to apply.
 - [x] T-004 [owner: igaro-platform] [deps: T-002] Prisma schema for all v1.0 tables (incl. credential_events, audit_logs, anchor_status)
   - Done: packages/db/prisma/schema.prisma (Prisma 6, 14+ tables, composite tenant FKs, issuer key FK). No migration yet. T-005/T-006 carry review constraints (see sub-bullets).
-- [ ] T-005 [owner: igaro-platform] [deps: T-004] Initial migration with RLS policies per tenant table and restricted app DB role
+- [x] T-005 [owner: igaro-platform] [deps: T-004] Initial migration with RLS policies per tenant table and restricted app DB role
+  - Done: init migration (RLS ENABLE+FORCE on 15 tables, NOLOGIN igaro_app, column-level UPDATE grants, ON UPDATE RESTRICT FKs, key/institution status guards). Follow-ups for T-006: lifecycle enforcement in DB; fixed search_path on trigger functions; CHECK credential_id NULL when institution_id NULL on verification_logs. Key rotation is platform-scope only at DB level (T-015/T-017).
   - From T-004 review: `CHECK ((role = 'PLATFORM_ADMIN') = (institution_id IS NULL))` on users
   - From T-004 review: `UNIQUE NULLS NOT DISTINCT (institution_id, seq)` and `(institution_id, prev_hash)` on audit_logs; `UNIQUE NULLS NOT DISTINCT (institution_id, day)` on audit_head_hashes
   - From T-004 review: partial unique index, one ACTIVE key per institution (`institution_keys (institution_id) WHERE status = 'ACTIVE'`)

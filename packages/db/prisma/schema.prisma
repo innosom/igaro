@@ -150,7 +150,7 @@ model InstitutionKey {
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   retiredAt           DateTime? @map("retired_at") @db.Timestamptz(6)
 
-  institution Institution  @relation(fields: [institutionId], references: [id])
+  institution Institution  @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   credentials Credential[]
 
   // Target of the composite FK from credentials (institution_id, issuer_kid).
@@ -172,7 +172,7 @@ model User {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  institution    Institution?    @relation(fields: [institutionId], references: [id])
+  institution    Institution?    @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   sessions       Session[]
   passwordResets PasswordReset[]
 
@@ -194,9 +194,9 @@ model Session {
   userAgent     String?  @map("user_agent")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  institution Institution? @relation(fields: [institutionId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   // Plain FK: institution_id is nullable (platform scope). Same-tenant consistency is enforced in T-005 SQL.
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@index([userId])
   @@index([expiresAt])
@@ -214,7 +214,7 @@ model Invite {
   usedAt        DateTime? @map("used_at") @db.Timestamptz(6)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  institution Institution @relation(fields: [institutionId], references: [id])
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([institutionId, email])
   @@index([institutionId, createdAt])
@@ -230,9 +230,9 @@ model PasswordReset {
   usedAt        DateTime? @map("used_at") @db.Timestamptz(6)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  institution Institution? @relation(fields: [institutionId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   // Plain FK: institution_id is nullable (platform scope). Same-tenant consistency is enforced in T-005 SQL.
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@index([userId])
   @@index([institutionId, createdAt])
@@ -250,7 +250,7 @@ model CredentialType {
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  institution Institution  @relation(fields: [institutionId], references: [id])
+  institution Institution  @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   credentials Credential[]
 
   @@unique([institutionId, code])
@@ -270,7 +270,7 @@ model CredentialHolder {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  institution Institution  @relation(fields: [institutionId], references: [id])
+  institution Institution  @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   credentials Credential[]
 
   @@unique([institutionId, externalId])
@@ -304,11 +304,11 @@ model Credential {
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  institution   Institution       @relation(fields: [institutionId], references: [id])
-  holder        CredentialHolder  @relation(fields: [institutionId, holderId], references: [institutionId, id])
-  type          CredentialType    @relation(fields: [institutionId, typeId], references: [institutionId, id])
-  issuerKey     InstitutionKey    @relation(fields: [institutionId, issuerKid], references: [institutionId, kid])
-  supersededBy  Credential?       @relation("Reissue", fields: [institutionId, supersededById], references: [institutionId, id])
+  institution   Institution       @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  holder        CredentialHolder  @relation(fields: [institutionId, holderId], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
+  type          CredentialType    @relation(fields: [institutionId, typeId], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
+  issuerKey     InstitutionKey    @relation(fields: [institutionId, issuerKid], references: [institutionId, kid], onDelete: Restrict, onUpdate: Restrict)
+  supersededBy  Credential?       @relation("Reissue", fields: [institutionId, supersededById], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
   supersedes    Credential?       @relation("Reissue")
   events        CredentialEvent[]
   verifications VerificationLog[]
@@ -335,8 +335,8 @@ model CredentialEvent {
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   anchoredAt    DateTime?           @map("anchored_at") @db.Timestamptz(6)
 
-  institution Institution @relation(fields: [institutionId], references: [id])
-  credential  Credential  @relation(fields: [institutionId, credentialId], references: [institutionId, id])
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  credential  Credential  @relation(fields: [institutionId, credentialId], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([credentialId, createdAt])
   @@index([institutionId, createdAt])
@@ -354,8 +354,8 @@ model VerificationLog {
   userAgent     String?            @map("user_agent")
   createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  institution Institution? @relation(fields: [institutionId], references: [id])
-  credential  Credential?  @relation(fields: [credentialId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  credential  Credential?  @relation(fields: [credentialId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([credentialId, createdAt])
   @@index([institutionId, createdAt])
@@ -378,8 +378,10 @@ model AuditLog {
   prevHash      String   @map("prev_hash")
   entryHash     String   @map("entry_hash")
 
-  institution Institution? @relation(fields: [institutionId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
+  // Prisma's unique treats NULL institution_id as distinct; the NULLS NOT DISTINCT
+  // variants (which also cover the platform chain) are added in the init migration SQL.
   @@unique([institutionId, seq])
   @@unique([entryHash])
   @@index([institutionId, createdAt])
@@ -394,11 +396,11 @@ model AuditHeadHash {
   day           DateTime @db.Date
   headHash      String   @map("head_hash")
   signature     String
-  signerKid     String?  @map("signer_kid")
+  signerKid     String   @map("signer_kid")
   otsProof      Bytes?   @map("ots_proof")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  institution Institution? @relation(fields: [institutionId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   // NULLs are distinct in Postgres; platform-chain uniqueness is enforced in T-005 SQL.
   @@unique([institutionId, day])
@@ -419,7 +421,7 @@ model ImportBatch {
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   completedAt   DateTime?         @map("completed_at") @db.Timestamptz(6)
 
-  institution Institution @relation(fields: [institutionId], references: [id])
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   rows        ImportRow[]
 
   @@unique([institutionId, id])
@@ -439,8 +441,8 @@ model ImportRow {
   credentialId  String?         @map("credential_id") @db.Uuid
   createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  batch      ImportBatch @relation(fields: [institutionId, batchId], references: [institutionId, id], onDelete: Cascade)
-  credential Credential? @relation(fields: [institutionId, credentialId], references: [institutionId, id])
+  batch      ImportBatch @relation(fields: [institutionId, batchId], references: [institutionId, id], onDelete: Cascade, onUpdate: Restrict)
+  credential Credential? @relation(fields: [institutionId, credentialId], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([batchId, rowNumber])
   @@index([institutionId, status])

@@ -10,7 +10,7 @@
 | 6 | Phishing / fake QR | Card text "Verify only at verify.igaro.app"; QR holds URL only | User behaviour |
 | 7 | Stolen admin account | Argon2id, login rate limiting, httpOnly Secure cookies, hashed session tokens, audit of all actions | MFA/SSO out of scope (Phase 1) |
 | 8 | Stolen institution signing key | Rotation, retired/compromised states in keys.json | Credentials by compromised key must be reissued |
-| 9 | Cross-tenant access | Session-derived institution_id + RLS; 404 tests | none |
+| 9 | Cross-tenant access | Session-derived institution_id + RLS (ENABLE + FORCE, non-owner app role, column-level UPDATE grants, ON UPDATE RESTRICT FKs); 404 tests | M2: scope is a plain session setting (`app.institution_id`, `app.is_platform_admin`, lookup settings). Anyone who can run arbitrary SQL as the app role (SQL injection, a compromised API process) can set them and read or write any tenant, so RLS backs up the data-access layer and does not replace it. Superusers and BYPASSRLS roles skip RLS entirely. |
 | 10 | Dictionary guess of hash from name+ID | 256-bit salt in payload | Salt deletion unlinks person |
 | 11 | Replay of signature in another context | Domain prefix `igaro.credential.sig.v1:` | none |
 | 12 | Secrets in logs | Redaction, QA test | none |
