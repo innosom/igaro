@@ -301,6 +301,10 @@ model Credential {
   holderTokenHash   String           @unique @map("holder_token_hash")
   supersededById    String?          @unique @map("superseded_by") @db.Uuid
   anchorStatus      AnchorStatus     @default(NOT_ANCHORED) @map("anchor_status")
+  // Inserting transaction id (txid_current()), forced by a trigger; immutable.
+  createdTxid       BigInt           @default(dbgenerated("txid_current()")) @map("created_txid")
+  // Transaction that last changed status; set by triggers on insert and each status change.
+  statusTxid        BigInt           @default(dbgenerated("txid_current()")) @map("status_txid")
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -334,10 +338,16 @@ model CredentialEvent {
   payload       Json                @default("{}")
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   anchoredAt    DateTime?           @map("anchored_at") @db.Timestamptz(6)
+  // Writing transaction id (txid_current()), forced by a trigger; lets the credentials lifecycle
+  // trigger require a matching event in the same transaction as a status change.
+  txid          BigInt              @default(dbgenerated("txid_current()"))
+  // Insert order only (assigned by a trigger); no rule depends on it.
+  seq           BigInt              @default(autoincrement())
 
   institution Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  credential  Credential  @relation(fields: [institutionId, credentialId], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
+  credential  Credential @relation(fields: [institutionId, credentialId], references: [institutionId, id], onDelete: Restrict, onUpdate: Restrict)
 
+  @@unique([credentialId, txid])
   @@index([credentialId, createdAt])
   @@index([institutionId, createdAt])
   @@index([anchoredAt])
