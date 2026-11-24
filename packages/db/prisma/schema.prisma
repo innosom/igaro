@@ -1,0 +1,447 @@
+// iGARO v1.0 data model (white paper section 10).
+// Schema only: migrations, RLS policies, triggers and grants are added in T-005/T-006.
+// Tenant tables carry institution_id; NULL institution_id means platform scope.
+// Tokens (session/invite/reset) are stored only as SHA-256 hashes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InstitutionStatus {
+  ACTIVE
+  SUSPENDED
+
+  @@map("institution_status")
+}
+
+enum KeyStatus {
+  ACTIVE
+  RETIRED
+  COMPROMISED
+
+  @@map("key_status")
+}
+
+enum UserRole {
+  PLATFORM_ADMIN
+  INSTITUTION_ADMIN
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("user_status")
+}
+
+enum CredentialKind {
+  ID_CARD
+  CERTIFICATE
+
+  @@map("credential_kind")
+}
+
+enum CredentialStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  SUPERSEDED
+
+  @@map("credential_status")
+}
+
+enum AnchorStatus {
+  NOT_ANCHORED
+  PENDING
+  ANCHORED
+  FAILED
+
+  @@map("anchor_status")
+}
+
+enum CredentialEventType {
+  ISSUED
+  SUSPENDED
+  REINSTATED
+  REVOKED
+  REISSUED
+
+  @@map("credential_event_type")
+}
+
+enum VerificationResult {
+  NOT_FOUND
+  VERIFICATION_FAILED
+  KEY_COMPROMISED
+  REVOKED
+  SUSPENDED
+  SUPERSEDED
+  EXPIRED
+  VALID_WITH_WARNING
+  VERIFIED
+
+  @@map("verification_result")
+}
+
+enum ImportBatchStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("import_batch_status")
+}
+
+enum ImportRowStatus {
+  PENDING
+  IMPORTED
+  ERROR
+
+  @@map("import_row_status")
+}
+
+model Institution {
+  id             String            @id @default(uuid()) @db.Uuid
+  name           String
+  slug           String            @unique
+  logoKey        String?           @map("logo_key")
+  primaryColor   String            @default("#1d4ed8") @map("primary_color")
+  secondaryColor String            @default("#0f172a") @map("secondary_color")
+  cardTitle      String?           @map("card_title")
+  publicFields   Json              @default("[]") @map("public_fields")
+  status         InstitutionStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  keys             InstitutionKey[]
+  users            User[]
+  sessions         Session[]
+  invites          Invite[]
+  passwordResets   PasswordReset[]
+  credentialTypes  CredentialType[]
+  holders          CredentialHolder[]
+  credentials      Credential[]
+  credentialEvents CredentialEvent[]
+  verificationLogs VerificationLog[]
+  auditLogs        AuditLog[]
+  auditHeadHashes  AuditHeadHash[]
+  importBatches    ImportBatch[]
+
+  @@map("institutions")
+}
+
+model InstitutionKey {
+  id                  String    @id @default(uuid()) @db.Uuid
+  institutionId       String    @map("institution_id") @db.Uuid
+  kid                 String    @unique
+  algorithm           String    @default("Ed25519")
+  publicKey           String    @map("public_key")
+  // AES-256-GCM (master key held outside the DB) envelope; never stored or logged in plaintext.
+  encryptedPrivateKey String    @map("encrypted_private_key")
+  status              KeyStatus @default(ACTIVE)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  retiredAt           DateTime? @map("retired_at") @db.Timestamptz(6)
+
+  institution Institution  @relation(fields: [institutionId], references: [id])
+  credentials Credential[]
+
+  // Target of the composite FK from credentials (institution_id, issuer_kid).
+  @@unique([institutionId, kid])
+  @@index([institutionId, status])
+  @@index([institutionId, createdAt])
+  @@map("institution_keys")
+}
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  // NULL = platform admin
+  institutionId String?    @map("institution_id") @db.Uuid
+  email         String
+  name          String
+  passwordHash  String?    @map("password_hash")
+  role          UserRole
+  status        UserStatus @default(ACTIVE)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  institution    Institution?    @relation(fields: [institutionId], references: [id])
+  sessions       Session[]
+  passwordResets PasswordReset[]
+
+  // Email is the global login identifier; store lowercased.
+  @@unique([email])
+  @@unique([institutionId, id])
+  @@index([institutionId, status])
+  @@index([institutionId, createdAt])
+  @@map("users")
+}
+
+model Session {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String?  @map("institution_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  tokenHash     String   @unique @map("token_hash")
+  expiresAt     DateTime @map("expires_at") @db.Timestamptz(6)
+  ip            String?
+  userAgent     String?  @map("user_agent")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  institution Institution? @relation(fields: [institutionId], references: [id])
+  // Plain FK: institution_id is nullable (platform scope). Same-tenant consistency is enforced in T-005 SQL.
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([institutionId, createdAt])
+  @@map("sessions")
+}
+
+model Invite {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  email         String
+  // No role column: an invite can only ever create an INSTITUTION_ADMIN.
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt        DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  institution Institution @relation(fields: [institutionId], references: [id])
+
+  @@index([institutionId, email])
+  @@index([institutionId, createdAt])
+  @@map("invites")
+}
+
+model PasswordReset {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String?   @map("institution_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt        DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  institution Institution? @relation(fields: [institutionId], references: [id])
+  // Plain FK: institution_id is nullable (platform scope). Same-tenant consistency is enforced in T-005 SQL.
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([institutionId, createdAt])
+  @@map("password_resets")
+}
+
+model CredentialType {
+  id              String         @id @default(uuid()) @db.Uuid
+  institutionId   String         @map("institution_id") @db.Uuid
+  code            String
+  name            String
+  kind            CredentialKind
+  attributeSchema Json           @default("[]") @map("attribute_schema")
+  validityDays    Int?           @map("validity_days")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  institution Institution  @relation(fields: [institutionId], references: [id])
+  credentials Credential[]
+
+  @@unique([institutionId, code])
+  @@unique([institutionId, id])
+  @@index([institutionId, createdAt])
+  @@map("credential_types")
+}
+
+model CredentialHolder {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String   @map("institution_id") @db.Uuid
+  fullName      String   @map("full_name")
+  externalId    String?  @map("external_id")
+  email         String?
+  photoKey      String?  @map("photo_key")
+  photoSha256   String?  @map("photo_sha256")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  institution Institution  @relation(fields: [institutionId], references: [id])
+  credentials Credential[]
+
+  @@unique([institutionId, externalId])
+  @@unique([institutionId, id])
+  @@index([institutionId, createdAt])
+  @@map("credential_holders")
+}
+
+model Credential {
+  id                String           @id @default(uuid()) @db.Uuid
+  institutionId     String           @map("institution_id") @db.Uuid
+  holderId          String           @map("holder_id") @db.Uuid
+  typeId            String           @map("type_id") @db.Uuid
+  // Human-readable only; never used for lookup.
+  credentialNumber  String           @map("credential_number")
+  status            CredentialStatus @default(DRAFT)
+  // Signed payload (igaro.credential.v1). Immutable once signed.
+  payload           Json
+  dataHash          String           @map("data_hash")
+  issuerKid         String           @map("issuer_kid")
+  signature         String
+  issuedAt          DateTime?        @map("issued_at") @db.Timestamptz(6)
+  expiresAt         DateTime?        @map("expires_at") @db.Timestamptz(6)
+  // 128-bit random tokens; needed in clear for public lookup.
+  verificationToken String           @unique @map("verification_token")
+  holderToken       String           @unique @map("holder_token")
+  supersededById    String?          @unique @map("superseded_by") @db.Uuid
+  anchorStatus      AnchorStatus     @default(NOT_ANCHORED) @map("anchor_status")
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  institution   Institution       @relation(fields: [institutionId], references: [id])
+  holder        CredentialHolder  @relation(fields: [institutionId, holderId], references: [institutionId, id])
+  type          CredentialType    @relation(fields: [institutionId, typeId], references: [institutionId, id])
+  issuerKey     InstitutionKey    @relation(fields: [institutionId, issuerKid], references: [institutionId, kid])
+  supersededBy  Credential?       @relation("Reissue", fields: [institutionId, supersededById], references: [institutionId, id])
+  supersedes    Credential?       @relation("Reissue")
+  events        CredentialEvent[]
+  verifications VerificationLog[]
+  importRows    ImportRow[]
+
+  @@unique([institutionId, credentialNumber])
+  @@unique([institutionId, supersededById])
+  @@unique([institutionId, id])
+  @@index([institutionId, status])
+  @@index([institutionId, createdAt])
+  @@index([holderId])
+  @@index([typeId])
+  @@index([anchorStatus])
+  @@map("credentials")
+}
+
+// Lifecycle event log and Phase 1 anchoring outbox.
+model CredentialEvent {
+  id            String              @id @default(uuid()) @db.Uuid
+  institutionId String              @map("institution_id") @db.Uuid
+  credentialId  String              @map("credential_id") @db.Uuid
+  type          CredentialEventType
+  payload       Json                @default("{}")
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  anchoredAt    DateTime?           @map("anchored_at") @db.Timestamptz(6)
+
+  institution Institution @relation(fields: [institutionId], references: [id])
+  credential  Credential  @relation(fields: [institutionId, credentialId], references: [institutionId, id])
+
+  @@index([credentialId, createdAt])
+  @@index([institutionId, createdAt])
+  @@index([anchoredAt])
+  @@map("credential_events")
+}
+
+model VerificationLog {
+  id            String             @id @default(uuid()) @db.Uuid
+  // NULL credential/institution when the token was not found.
+  institutionId String?            @map("institution_id") @db.Uuid
+  credentialId  String?            @map("credential_id") @db.Uuid
+  result        VerificationResult
+  ipHash        String?            @map("ip_hash")
+  userAgent     String?            @map("user_agent")
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  institution Institution? @relation(fields: [institutionId], references: [id])
+  credential  Credential?  @relation(fields: [credentialId], references: [id])
+
+  @@index([credentialId, createdAt])
+  @@index([institutionId, createdAt])
+  @@map("verification_logs")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  // NULL = platform-level chain
+  institutionId String?  @map("institution_id") @db.Uuid
+  // Per-chain monotonic position, assigned under a DB lock.
+  seq           BigInt
+  actorId       String?  @map("actor_id") @db.Uuid
+  action        String
+  targetType    String?  @map("target_type")
+  targetId      String?  @map("target_id")
+  metadata      Json     @default("{}")
+  ip            String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  prevHash      String   @map("prev_hash")
+  entryHash     String   @map("entry_hash")
+
+  institution Institution? @relation(fields: [institutionId], references: [id])
+
+  @@unique([institutionId, seq])
+  @@unique([entryHash])
+  @@index([institutionId, createdAt])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
+}
+
+// Daily signed head of each audit chain, with OpenTimestamps proof.
+model AuditHeadHash {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String?  @map("institution_id") @db.Uuid
+  day           DateTime @db.Date
+  headHash      String   @map("head_hash")
+  signature     String
+  signerKid     String?  @map("signer_kid")
+  otsProof      Bytes?   @map("ots_proof")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  institution Institution? @relation(fields: [institutionId], references: [id])
+
+  // NULLs are distinct in Postgres; platform-chain uniqueness is enforced in T-005 SQL.
+  @@unique([institutionId, day])
+  @@index([institutionId, createdAt])
+  @@map("audit_head_hashes")
+}
+
+model ImportBatch {
+  id            String            @id @default(uuid()) @db.Uuid
+  institutionId String            @map("institution_id") @db.Uuid
+  createdById   String?           @map("created_by") @db.Uuid
+  filename      String?
+  sourceKey     String?           @map("source_key")
+  status        ImportBatchStatus @default(PENDING)
+  totalRows     Int               @default(0) @map("total_rows")
+  importedRows  Int               @default(0) @map("imported_rows")
+  errorRows     Int               @default(0) @map("error_rows")
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt   DateTime?         @map("completed_at") @db.Timestamptz(6)
+
+  institution Institution @relation(fields: [institutionId], references: [id])
+  rows        ImportRow[]
+
+  @@unique([institutionId, id])
+  @@index([institutionId, status])
+  @@index([institutionId, createdAt])
+  @@map("import_batches")
+}
+
+model ImportRow {
+  id            String          @id @default(uuid()) @db.Uuid
+  institutionId String          @map("institution_id") @db.Uuid
+  batchId       String          @map("batch_id") @db.Uuid
+  rowNumber     Int             @map("row_number")
+  status        ImportRowStatus @default(PENDING)
+  data          Json
+  error         String?
+  credentialId  String?         @map("credential_id") @db.Uuid
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch      ImportBatch @relation(fields: [institutionId, batchId], references: [institutionId, id], onDelete: Cascade)
+  credential Credential? @relation(fields: [institutionId, credentialId], references: [institutionId, id])
+
+  @@unique([batchId, rowNumber])
+  @@index([institutionId, status])
+  @@index([institutionId, createdAt])
+  @@map("import_rows")
+}
