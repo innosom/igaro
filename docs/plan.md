@@ -9,7 +9,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: pnpm workspace scaffold with 6 skeleton packages; build, typecheck, lint, test pass. Web is a TS placeholder (Next.js comes with T-035). Follow-ups: pnpm onlyBuiltDependencies allowlist, exclude tests from build tsconfig.
 - [x] T-002 [owner: igaro-platform] [deps: T-001] Docker Compose (Postgres, Mailpit, MinIO) and .env.example
   - Done: docker-compose.yml (Postgres 16, Mailpit, MinIO + private bucket init), .env.example, docs/dev-setup.md. Not run (no Docker in CI runner). Follow-ups: pin image versions; apps must use APP_DATABASE_URL and fail on superuser/placeholder MASTER_KEY.
-- [ ] T-003 [owner: igaro-platform] [deps: T-001] Draft CI workflow proposal in docs/ci-proposals.md (lint, type-check, tests)
+- [x] T-003 [owner: igaro-platform] [deps: T-001] Draft CI workflow proposal in docs/ci-proposals.md (lint, type-check, tests)
+  - Done: proposal P-001 in docs/ci-proposals.md. Docs only, no .github changes; owner to apply.
 - [ ] T-004 [owner: igaro-platform] [deps: T-002] Prisma schema for all v1.0 tables (incl. credential_events, audit_logs, anchor_status)
 - [ ] T-005 [owner: igaro-platform] [deps: T-004] Initial migration with RLS policies per tenant table and restricted app DB role
 - [ ] T-006 [owner: igaro-platform] [deps: T-005] DB triggers (REVOKED is final, status change only via credential_events) and append-only audit_logs grants
