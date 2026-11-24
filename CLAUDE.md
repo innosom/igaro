@@ -29,7 +29,7 @@ MinIO/S3, Resend/SES (Mailpit locally), Docker Compose (Postgres, Mailpit, MinIO
    Status, tokens and branding stay OUTSIDE the payload. Changing canonical output requires a new `schemaVersion`.
 2. **One shared crypto package** (`packages/core`) used by API, worker and CLI. Golden tests must stay byte-identical forever.
 3. **Identifiers:** internal UUID `id`; human `credential_number` (never used for lookup); 128-bit `verification_token`
-   (only thing in QR/URL); separate `holder_token`. Session/invite/reset tokens are stored only as hashes.
+   (only thing in QR/URL); separate `holder_token`. Session/invite/reset/holder tokens are stored only as hashes (ADR 0002).
 4. **Lifecycle:** DRAFT → ACTIVE; ACTIVE ↔ SUSPENDED; ACTIVE → REVOKED (terminal); ACTIVE → SUPERSEDED via reissue (terminal,
    links to new). EXPIRED is computed at read time. A DB trigger refuses any change out of REVOKED. Status changes only
    through `credential_events`. Credentials are never deleted. Signed data is never edited in place — corrections are reissues.

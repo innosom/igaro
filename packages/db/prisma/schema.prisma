@@ -1,7 +1,7 @@
 // iGARO v1.0 data model (white paper section 10).
 // Schema only: migrations, RLS policies, triggers and grants are added in T-005/T-006.
 // Tenant tables carry institution_id; NULL institution_id means platform scope.
-// Tokens (session/invite/reset) are stored only as SHA-256 hashes.
+// Tokens (session/invite/reset/holder) are stored only as SHA-256 hashes.
 
 generator client {
   provider = "prisma-client-js"
@@ -294,9 +294,11 @@ model Credential {
   signature         String
   issuedAt          DateTime?        @map("issued_at") @db.Timestamptz(6)
   expiresAt         DateTime?        @map("expires_at") @db.Timestamptz(6)
-  // 128-bit random tokens; needed in clear for public lookup.
+  // 128-bit random token; kept in clear because the QR code and card must show it.
   verificationToken String           @unique @map("verification_token")
-  holderToken       String           @unique @map("holder_token")
+  // SHA-256 of the 128-bit holder token (ADR 0002). The clear token only goes into the
+  // holder email; "resend link" issues a new token.
+  holderTokenHash   String           @unique @map("holder_token_hash")
   supersededById    String?          @unique @map("superseded_by") @db.Uuid
   anchorStatus      AnchorStatus     @default(NOT_ANCHORED) @map("anchor_status")
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)

@@ -60,7 +60,7 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 ## W4 Verification, keys.json, CLI
 - [ ] T-031 [owner: igaro-crypto-core] [deps: T-022, T-023] Verification algorithm in packages/core following invariant 7 order
 - [ ] T-032 [owner: igaro-api] [deps: T-031, T-026] Public GET /verify/:token and credential.json, hashed-IP verification log, per-IP and per-token rate limits, ops alert on failure
-- [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken
+- [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken (lookup by SHA-256 of the token, ADR 0002)
 - [ ] T-034 [owner: igaro-crypto-core] [deps: T-031] tools/verify-cli independent verifier (no iGARO API calls) with tests
 - [ ] T-035 [owner: igaro-web] [deps: T-010] apps/web scaffold, Tailwind, login, invite accept and password reset pages
 - [ ] T-036 [owner: igaro-web] [deps: T-032, T-033, T-035] Public /v/:token page with all result states and data-driven proof panel (Not anchored)
