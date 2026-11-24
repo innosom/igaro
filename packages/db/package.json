@@ -10,16 +10,19 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
+    "seed": "tsx src/seed-cli.ts",
     "prisma:format": "prisma format",
     "prisma:validate": "DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy prisma validate",
     "prisma:generate": "DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^6"
+    "@node-rs/argon2": "^2.2.2",
+    "@prisma/client": "^6",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
-    "pg": "^8.23.1",
-    "prisma": "^6"
+    "prisma": "^6",
+    "tsx": "^4.23.15"
   }
 }
