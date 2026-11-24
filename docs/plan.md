@@ -24,7 +24,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - From T-004 review: `superseded_by IS NOT NULL` iff `status = 'SUPERSEDED'` (CHECK on credentials)
   - From T-004 review: sessions/password_resets use a plain FK to users (institution_id is nullable); enforce `institution_id IS NOT DISTINCT FROM users.institution_id` via trigger or CHECK-backed approach
   - Schema now has composite tenant FKs (institution_id + fk -> institution_id + id) for credentials, credential_events, import_rows, and credentials (institution_id, issuer_kid) -> institution_keys; migration SQL must emit them and the supporting UNIQUE (institution_id, id) constraints
-- [ ] T-006 [owner: igaro-platform] [deps: T-005] DB triggers (REVOKED is final, status change only via credential_events) and append-only audit_logs grants
+- [x] T-006 [owner: igaro-platform] [deps: T-005] DB triggers (REVOKED is final, status change only via credential_events) and append-only audit_logs grants
+  - Done: migration 20261124010000_lifecycle_triggers (REVOKED-final, status only via txid-bound credential_events with deferred commit checks, insert guard, signed-column immutability, no credential delete/truncate, append-only audit/head/verification logs, pinned search_path). 74 db tests pass; security review ship after 3 rounds. Notes: API issuance must INSERT the credential as ACTIVE+signed with its ISSUED event in one txn; one status change per credential per txn; audit_head_hashes can't be UPDATEd, so OTS proof upgrades need a separate row (T-028 decision); a REVOKED row is fully frozen incl. anchor_status (Phase 1 question).
   - From T-004 review: no DELETE on credentials (trigger and no grant)
   - From T-004 review: no UPDATE/DELETE on audit_logs or audit_head_hashes
   - From T-004 review: credential_events allow UPDATE of `anchored_at` only

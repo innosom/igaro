@@ -120,8 +120,20 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
     kid: string,
     num: string,
     extra: { status?: string; supersededBy?: string | null; vtoken?: string } = {},
-  ) =>
-    c.query(
+  ) => insCredentialWithEvent(id, inst, holder, type, kid, num, extra);
+  // T-006: a credential may only be inserted DRAFT or ACTIVE, and ACTIVE needs an ISSUED event
+  // in the same transaction.
+  async function insCredentialWithEvent(
+    id: string,
+    inst: string,
+    holder: string,
+    type: string,
+    kid: string,
+    num: string,
+    extra: { status?: string; supersededBy?: string | null; vtoken?: string },
+  ): Promise<void> {
+    const status = extra.status ?? 'ACTIVE';
+    await c.query(
       `INSERT INTO credentials (id, institution_id, holder_id, type_id, credential_number, status,
          payload, data_hash, issuer_kid, signature, verification_token, holder_token_hash,
          superseded_by, updated_at)
@@ -132,13 +144,20 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
         holder,
         type,
         num,
-        extra.status ?? 'ACTIVE',
+        status,
         kid,
         extra.vtoken ?? `vt-${num}`,
         `ht-${num}`,
         extra.supersededBy ?? null,
       ],
     );
+    if (status === 'ACTIVE') {
+      await c.query(
+        `INSERT INTO credential_events (id, institution_id, credential_id, type) VALUES ($1,$2,$3,'ISSUED')`,
+        [uid(), inst, id],
+      );
+    }
+  }
 
   // Fixture ids
   const ids = {
@@ -350,7 +369,7 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
       for (const sql of [
         `UPDATE audit_head_hashes SET head_hash = 'x'`,
         'DELETE FROM audit_head_hashes',
-        `UPDATE credential_events SET anchored_at = now()`,
+        `UPDATE credential_events SET type = 'REVOKED'`, // only anchored_at is granted (L1)
         'DELETE FROM credential_events',
         `UPDATE verification_logs SET result = 'VERIFIED'`,
         'DELETE FROM verification_logs',
@@ -419,7 +438,7 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
       await asTenant(A, async () => {
         const u = await c.query(`UPDATE credential_holders SET full_name = 'Renamed' WHERE id = $1`, [ids.holderA]);
         expect(u.rowCount).toBe(1);
-        const s = await c.query(`UPDATE credentials SET status = 'SUSPENDED' WHERE id = $1`, [ids.credA]);
+        const s = await c.query(`UPDATE credentials SET anchor_status = 'PENDING' WHERE id = $1`, [ids.credA]);
         expect(s.rowCount).toBe(1);
         const i = await c.query(`UPDATE institutions SET card_title = 'Card' WHERE id = $1`, [A]);
         expect(i.rowCount).toBe(1);
@@ -573,7 +592,8 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
       };
       expect(await run(() => insert('ACTIVE', ids.credA))).toBe('23514');
       expect(await run(() => insert('SUPERSEDED', null))).toBe('23514');
-      expect(await run(() => insert('SUPERSEDED', ids.credA))).toBeUndefined();
+      // T-006: direct insert as SUPERSEDED is refused by the insert guard
+      expect(await run(() => insert('SUPERSEDED', ids.credA))).toBe('23514');
       // holder belonging to tenant B cannot be referenced by a tenant A credential
       expect(await run(() => insert('ACTIVE', null, ids.holderB))).toBe('23503');
       expect(await run(() => insert('ACTIVE', null, ids.holderA, 'vt-NUM-a'))).toBe('23505');
