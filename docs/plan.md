@@ -11,9 +11,23 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: docker-compose.yml (Postgres 16, Mailpit, MinIO + private bucket init), .env.example, docs/dev-setup.md. Not run (no Docker in CI runner). Follow-ups: pin image versions; apps must use APP_DATABASE_URL and fail on superuser/placeholder MASTER_KEY.
 - [x] T-003 [owner: igaro-platform] [deps: T-001] Draft CI workflow proposal in docs/ci-proposals.md (lint, type-check, tests)
   - Done: proposal P-001 in docs/ci-proposals.md. Docs only, no .github changes; owner to apply.
-- [ ] T-004 [owner: igaro-platform] [deps: T-002] Prisma schema for all v1.0 tables (incl. credential_events, audit_logs, anchor_status)
+- [x] T-004 [owner: igaro-platform] [deps: T-002] Prisma schema for all v1.0 tables (incl. credential_events, audit_logs, anchor_status)
+  - Done: packages/db/prisma/schema.prisma (Prisma 6, 14+ tables, composite tenant FKs, issuer key FK). No migration yet. T-005/T-006 carry review constraints (see sub-bullets).
 - [ ] T-005 [owner: igaro-platform] [deps: T-004] Initial migration with RLS policies per tenant table and restricted app DB role
+  - From T-004 review: `CHECK ((role = 'PLATFORM_ADMIN') = (institution_id IS NULL))` on users
+  - From T-004 review: `UNIQUE NULLS NOT DISTINCT (institution_id, seq)` and `(institution_id, prev_hash)` on audit_logs; `UNIQUE NULLS NOT DISTINCT (institution_id, day)` on audit_head_hashes
+  - From T-004 review: partial unique index, one ACTIVE key per institution (`institution_keys (institution_id) WHERE status = 'ACTIVE'`)
+  - From T-004 review: `CHECK (email = lower(email))` on users, invites and holders where email is stored
+  - From T-004 review: hex-colour CHECKs on institutions primary_color/secondary_color
+  - From T-004 review: `signer_kid` NOT NULL on audit_head_hashes
+  - From T-004 review: `superseded_by IS NOT NULL` iff `status = 'SUPERSEDED'` (CHECK on credentials)
+  - From T-004 review: sessions/password_resets use a plain FK to users (institution_id is nullable); enforce `institution_id IS NOT DISTINCT FROM users.institution_id` via trigger or CHECK-backed approach
+  - Schema now has composite tenant FKs (institution_id + fk -> institution_id + id) for credentials, credential_events, import_rows, and credentials (institution_id, issuer_kid) -> institution_keys; migration SQL must emit them and the supporting UNIQUE (institution_id, id) constraints
 - [ ] T-006 [owner: igaro-platform] [deps: T-005] DB triggers (REVOKED is final, status change only via credential_events) and append-only audit_logs grants
+  - From T-004 review: no DELETE on credentials (trigger and no grant)
+  - From T-004 review: no UPDATE/DELETE on audit_logs or audit_head_hashes
+  - From T-004 review: credential_events allow UPDATE of `anchored_at` only
+  - From T-004 review: signed columns (payload, data_hash, signature, issuer_kid) immutable once out of DRAFT
 - [ ] T-007 [owner: igaro-platform] [deps: T-005] Seed data (platform admin, demo institution, two credential type templates)
 - [ ] T-008 [owner: igaro-api] [deps: T-005] Fastify scaffold under /api/v1, config, log redaction, tenant-scoped data-access layer (institution_id from session)
 - [ ] T-009 [owner: igaro-api] [deps: T-008, T-007] Auth: login, logout, me with Argon2id and hashed httpOnly cookie sessions
@@ -46,7 +60,7 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 ## W4 Verification, keys.json, CLI
 - [ ] T-031 [owner: igaro-crypto-core] [deps: T-022, T-023] Verification algorithm in packages/core following invariant 7 order
 - [ ] T-032 [owner: igaro-api] [deps: T-031, T-026] Public GET /verify/:token and credential.json, hashed-IP verification log, per-IP and per-token rate limits, ops alert on failure
-- [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken
+- [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken (lookup by SHA-256 of the token, ADR 0002)
 - [ ] T-034 [owner: igaro-crypto-core] [deps: T-031] tools/verify-cli independent verifier (no iGARO API calls) with tests
 - [ ] T-035 [owner: igaro-web] [deps: T-010] apps/web scaffold, Tailwind, login, invite accept and password reset pages
 - [ ] T-036 [owner: igaro-web] [deps: T-032, T-033, T-035] Public /v/:token page with all result states and data-driven proof panel (Not anchored)
