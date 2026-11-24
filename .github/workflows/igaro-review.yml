@@ -54,9 +54,14 @@ jobs:
           if [ -z "$num" ]; then
             any=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length' 2>/dev/null || echo 1)
             busy=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow igaro-build.yml --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)
-            if [ "$any" = "0" ] && [ "$busy" = "0" ]; then
+            # Only restart after a successful build. After a failure, wait for the owner (or the 6-hourly
+            # schedule) instead of restarting a broken build every few minutes.
+            last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow igaro-build.yml --limit 1 --json conclusion --jq '.[0].conclusion // "none"' 2>/dev/null || echo unknown)
+            if [ "$any" = "0" ] && [ "$busy" = "0" ] && { [ "$last" = "success" ] || [ "$last" = "none" ]; }; then
               echo "::notice::No build PR open and the builder is idle: starting the next task."
               gh workflow run igaro-build.yml --repo "$GITHUB_REPOSITORY" --ref main
+            elif [ "$any" = "0" ] && [ "$busy" = "0" ]; then
+              echo "::warning::The last build run ended with '$last'. Not restarting it; check its log, then start the build loop by hand."
             else
               echo "::notice::Nothing to review."
             fi
@@ -92,6 +97,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The builder starts this workflow with `gh workflow run`, so the actor is github-actions[bot].
+          allowed_bots: "github-actions"
           show_full_output: true
           claude_args: |
             --max-turns 150

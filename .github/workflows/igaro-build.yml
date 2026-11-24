@@ -88,6 +88,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The reviewer starts this workflow with `gh workflow run`, so the actor is github-actions[bot].
+          allowed_bots: "github-actions"
           show_full_output: true
           display_report: true
           claude_args: |
@@ -133,6 +135,16 @@ jobs:
             - Never commit secrets. Use only test values. Never weaken a CLAUDE.md invariant to make a test pass.
             - If you are blocked (missing decision, conflicting spec), still open the PR with what you have and
               put the question at the top of its body, prefixed "BLOCKED:".
+
+      # A run that ends without a PR counts as a failure, so the reviewer will not restart it in a loop.
+      - name: Check that a build PR was opened
+        if: steps.gate.outputs.open == '0' && github.event.inputs.task == ''
+        run: |
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length')
+          if [ "$open" = "0" ]; then
+            echo "::error::The agent finished without opening a build PR."
+            exit 1
+          fi
 
       # GitHub's schedules are unreliable on new repos, so hand the new PR to the reviewer right away.
       - name: Start the reviewer agent
