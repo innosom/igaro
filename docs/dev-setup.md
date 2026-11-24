@@ -23,7 +23,14 @@ Data persists in the named volumes `pgdata` and `miniodata`. To reset, stop the
 stack and remove its volumes with `docker compose down -v`.
 
 All credentials in `docker-compose.yml` and `.env.example` are test-only.
-Migrations and seeds (`pnpm db:migrate`, `pnpm db:seed`) arrive with `packages/db`.
+Seed: `pnpm db:seed` (owner `DATABASE_URL`; idempotent; SEED_* in `.env.example`; see
+`packages/db/src/seed.ts`). It creates the platform admin, the `eau` institution and its admin,
+the STUDENT_ID and CERTIFICATE types and three demo holders, but no signing keys. With
+`NODE_ENV=production` only the platform admin is created (add `SEED_DEMO=1` for the demo data), and
+the test-only default password is refused everywhere except `NODE_ENV=development|test` or
+`SEED_ALLOW_TEST_PASSWORD=1`. The seed sets both the platform and the tenant scope, since the
+platform scope can only read credential types and holders. Tests run it as a NOSUPERUSER
+NOBYPASSRLS table-owner role.
 
 ## Database roles and RLS
 

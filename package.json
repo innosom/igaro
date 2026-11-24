@@ -11,6 +11,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "db:seed": "pnpm --filter @igaro/db seed",
     "format": "prettier --write ."
   },
   "devDependencies": {
