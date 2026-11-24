@@ -32,7 +32,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - From T-004 review: signed columns (payload, data_hash, signature, issuer_kid) immutable once out of DRAFT
 - [x] T-007 [owner: igaro-platform] [deps: T-005] Seed data (platform admin, demo institution, two credential type templates)
   - Done: `pnpm db:seed` creates platform admin, demo institution `eau` + admin, STUDENT_ID/CERTIFICATE types, 3 demo holders; Argon2id, idempotent, RLS-scoped, no keys. Production seeds only the platform admin unless SEED_DEMO=1; test password only in dev/test. Follow-ups: no root db:migrate runner yet; CI must allow @node-rs/argon2 native build; seed writes no audit entries (T-024).
-- [ ] T-008 [owner: igaro-api] [deps: T-005] Fastify scaffold under /api/v1, config, log redaction, tenant-scoped data-access layer (institution_id from session)
+- [x] T-008 [owner: igaro-api] [deps: T-005] Fastify scaffold under /api/v1, config, log redaction, tenant-scoped data-access layer (institution_id from session)
+  - Done: Fastify /api/v1 with config, health, error shape, pino redaction, withTenant DAL + HolderRepository (platform sessions read-only). 28 api tests pass incl. RLS cross-tenant 404; review ship after 2 Mediums fixed. Follow-ups: configurable trustProxy, startup role check (no superuser/BYPASSRLS), private Db.pool, hashed-IP log policy, core redactor.
 - [ ] T-009 [owner: igaro-api] [deps: T-008, T-007] Auth: login, logout, me with Argon2id and hashed httpOnly cookie sessions
 - [ ] T-010 [owner: igaro-api] [deps: T-009] Invite accept, password reset, login rate limiting
 - [ ] T-011 [owner: igaro-worker] [deps: T-005, T-002] Worker scaffold (pg-boss) and invite/reset email jobs to Mailpit
