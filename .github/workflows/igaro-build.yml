@@ -139,8 +139,14 @@ jobs:
       # A run that ends without a PR counts as a failure, so the reviewer will not restart it in a loop.
       - name: Check that a build PR was opened
         if: steps.gate.outputs.open == '0' && github.event.inputs.task == ''
+        # Not `--label`: that goes through the search index, which lags behind a just-created PR.
         run: |
-          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length')
+          for i in 1 2 3 4 5 6; do
+            open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json labels \
+                   --jq '[.[] | select(any(.labels[]; .name == "igaro-build"))] | length')
+            [ "$open" != "0" ] && break
+            sleep 10
+          done
           if [ "$open" = "0" ]; then
             echo "::error::The agent finished without opening a build PR."
             exit 1
