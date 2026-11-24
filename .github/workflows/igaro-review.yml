@@ -48,8 +48,21 @@ jobs:
       - name: Find a build PR waiting for review
         id: pr
         run: |
-          num=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open \
-                --json number,labels --jq '[.[] | select(all(.labels[]; .name != "needs-human"))][0].number // empty' 2>/dev/null || true)
+          # A needs-human PR that got new commits after it was labelled (a fix by the owner or the
+          # supervisor) goes back into review: drop the label so it is picked up below.
+          for n in $(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,labels \
+                     --jq '.[] | select(any(.labels[]; .name == "igaro-build") and any(.labels[]; .name == "needs-human")) | .number' 2>/dev/null); do
+            labelled=$(gh api "repos/$GITHUB_REPOSITORY/issues/$n/events?per_page=100" \
+                       --jq '[.[] | select(.event == "labeled" and .label.name == "needs-human")] | last | .created_at // empty' 2>/dev/null || true)
+            committed=$(gh pr view "$n" --repo "$GITHUB_REPOSITORY" --json commits --jq '.commits[-1].committedDate' 2>/dev/null || true)
+            if [ -n "$labelled" ] && [ -n "$committed" ] && [[ "$committed" > "$labelled" ]]; then
+              echo "::notice::PR #$n has commits after it was labelled needs-human: reviewing it again."
+              gh pr edit "$n" --repo "$GITHUB_REPOSITORY" --remove-label needs-human || true
+            fi
+          done
+          # Filter labels in jq, not with --label: that goes through the search index, which lags.
+          num=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,labels \
+                --jq '[.[] | select(any(.labels[]; .name == "igaro-build") and all(.labels[]; .name != "needs-human"))] | sort_by(.number) | .[0].number // empty' 2>/dev/null || true)
           echo "num=$num" >> "$GITHUB_OUTPUT"
           if [ -z "$num" ]; then
             any=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length' 2>/dev/null || echo 1)
