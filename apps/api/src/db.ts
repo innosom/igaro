@@ -46,6 +46,38 @@ export class Db {
   }
 
   /**
+   * Run fn in one transaction carrying only narrow single-row lookup settings (migration PART 4:
+   * app.login_email, app.session_token_hash, ...). No tenant or platform scope is set; fn may set
+   * one afterwards from the row it found. Only the auth module calls this, with values it was
+   * handed on an unauthenticated path.
+   */
+  async withLookup<T>(
+    settings: Readonly<Record<string, string>>,
+    fn: (c: pg.PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [k, v] of Object.entries(settings)) {
+        if (!/^app\.[a-z_]+$/.test(k)) throw new TypeError('invalid lookup setting');
+        await client.query('SELECT set_config($1, $2, true)', [k, v]);
+      }
+      const out = await fn(client);
+      await client.query('COMMIT');
+      return out;
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // connection is broken; release below discards it
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Run fn in one transaction scoped to the session. A tenant session sets only app.institution_id;
    * a platform session sets only app.is_platform_admin (never both, so it stays read-only).
    * Commits on success, rolls back on error.

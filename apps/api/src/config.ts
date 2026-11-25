@@ -26,6 +26,23 @@ export interface Config {
    */
   trustProxy: false | number | string;
   cookie: { name: string; secure: boolean; sameSite: 'lax'; domain: string | undefined };
+  /** Session lifetimes in seconds: idle (sliding) timeout and absolute maximum age. */
+  session: { idleSeconds: number; maxSeconds: number };
+}
+
+function parseSeconds(
+  raw: string | undefined,
+  name: string,
+  unitSeconds: number,
+  def: number,
+  min: number,
+  max: number,
+): number {
+  if (raw === undefined || raw === '') return def * unitSeconds;
+  if (!/^\d+$/.test(raw)) throw new ConfigError(`${name} must be a whole number`);
+  const n = Number(raw);
+  if (n < min || n > max) throw new ConfigError(`${name} must be between ${min} and ${max}`);
+  return n * unitSeconds;
 }
 
 type Env = Record<string, string | undefined>;
@@ -132,7 +149,16 @@ export function loadConfig(env: Env = process.env): Config {
     throw new ConfigError('COOKIE_SECURE must be true in production');
   }
 
+  const session = {
+    idleSeconds: parseSeconds(env.SESSION_IDLE_MINUTES, 'SESSION_IDLE_MINUTES', 60, 60, 1, 1440),
+    maxSeconds: parseSeconds(env.SESSION_MAX_HOURS, 'SESSION_MAX_HOURS', 3600, 12, 1, 720),
+  };
+  if (session.idleSeconds > session.maxSeconds) {
+    throw new ConfigError('SESSION_IDLE_MINUTES must not exceed SESSION_MAX_HOURS');
+  }
+
   return {
+    session,
     nodeEnv,
     host: env.API_HOST ?? '127.0.0.1',
     port,

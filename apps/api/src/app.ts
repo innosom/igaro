@@ -4,13 +4,25 @@ import type { DestinationStream } from 'pino';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 import { AppError } from './errors.js';
-import { loggerOptions } from './logging.js';
+import { AuthService } from './auth.js';
+import { registerAuth } from './auth-routes.js';
+import { hashIp, loggerOptions } from './logging.js';
+
+// Safe defaults when a caller (tests) does not pass cookie/session config: Secure cookie, 1 h idle, 12 h max.
+const DEFAULT_COOKIE: Config['cookie'] = {
+  name: 'igaro_session',
+  secure: true,
+  sameSite: 'lax',
+  domain: undefined,
+};
+const DEFAULT_SESSION: Config['session'] = { idleSeconds: 3600, maxSeconds: 12 * 3600 };
 
 export const API_PREFIX = '/api/v1';
 
 export interface BuildAppOptions {
   /** ipHashKey and trustProxy come from loadConfig in production; tests may omit them. */
-  config: Pick<Config, 'logLevel'> & Partial<Pick<Config, 'ipHashKey' | 'trustProxy'>>;
+  config: Pick<Config, 'logLevel'> &
+    Partial<Pick<Config, 'ipHashKey' | 'trustProxy' | 'cookie' | 'session'>>;
   db?: Db;
   /** Log destination; tests capture logs here. */
   logStream?: DestinationStream;
@@ -33,7 +45,8 @@ function fastifyTrustProxy(
 const errBody = (code: string, message: string) => ({ error: { code, message } });
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
-  const base = loggerOptions(opts.config.logLevel, opts.config.ipHashKey ?? randomBytes(32));
+  const ipHashKey = opts.config.ipHashKey ?? randomBytes(32);
+  const base = loggerOptions(opts.config.logLevel, ipHashKey);
   const app = Fastify({
     logger: opts.logStream ? { ...base, stream: opts.logStream } : base,
     trustProxy: fastifyTrustProxy(opts.config.trustProxy ?? false),
@@ -66,6 +79,16 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await app.register(
     async (api) => {
       api.get('/health', async () => ({ status: 'ok' }));
+      if (opts.db) {
+        registerAuth(
+          api,
+          new AuthService(opts.db, {
+            cookie: opts.config.cookie ?? DEFAULT_COOKIE,
+            session: opts.config.session ?? DEFAULT_SESSION,
+            hashIp: (ip) => hashIp(ip, ipHashKey),
+          }),
+        );
+      }
     },
     { prefix: API_PREFIX },
   );

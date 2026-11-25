@@ -73,6 +73,18 @@ describe('loadConfig', () => {
     ).toThrow(/IP_HASH_KEY is required/);
   });
 
+  it('parses session lifetimes (ADR 0004) and validates them', () => {
+    expect(loadConfig(good).session).toEqual({ idleSeconds: 3600, maxSeconds: 43200 });
+    expect(
+      loadConfig({ ...good, SESSION_IDLE_MINUTES: '15', SESSION_MAX_HOURS: '2' }).session,
+    ).toEqual({ idleSeconds: 900, maxSeconds: 7200 });
+    expect(() => loadConfig({ ...good, SESSION_IDLE_MINUTES: 'abc' })).toThrow(/SESSION_IDLE/);
+    expect(() => loadConfig({ ...good, SESSION_MAX_HOURS: '0' })).toThrow(/SESSION_MAX_HOURS/);
+    expect(() =>
+      loadConfig({ ...good, SESSION_IDLE_MINUTES: '600', SESSION_MAX_HOURS: '1' }),
+    ).toThrow(/must not exceed/);
+  });
+
   it('parses TRUST_PROXY (ADR 0003) and refuses "true"', () => {
     expect(loadConfig(good).trustProxy).toBe(false);
     expect(loadConfig({ ...good, TRUST_PROXY: 'false' }).trustProxy).toBe(false);
