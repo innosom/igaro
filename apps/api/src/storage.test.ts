@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { MemoryObjectStorage, S3ObjectStorage, StorageError } from './storage.js';
 import { extensionOf, sniffImage, stripMetadata } from './image.js';
+import { pngChunk } from './test-images.js';
 
 describe('S3ObjectStorage', () => {
   it('matches the AWS documented presigned GET example (SigV4 test vector)', async () => {
@@ -74,14 +75,13 @@ describe('MemoryObjectStorage', () => {
 });
 
 const png = (...extra: [string, Buffer][]): Buffer => {
-  const chunk = (type: string, data: Buffer) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    return Buffer.concat([len, Buffer.from(type, 'latin1'), data, Buffer.alloc(4)]);
-  };
+  const chunk = pngChunk;
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(4, 0);
+  ihdr.writeUInt32BE(4, 4);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', Buffer.alloc(13)),
+    chunk('IHDR', ihdr),
     ...extra.map(([t, d]) => chunk(t, d)),
     chunk('IDAT', Buffer.from('pixels')),
     chunk('IEND', Buffer.alloc(0)),
@@ -106,9 +106,9 @@ describe('image sniffing and metadata stripping', () => {
     expect(stripMetadata(png(), 'image/png')!.equals(png())).toBe(true);
   });
 
-  it('rejects truncated or trailing-garbage PNG and chunk-less data', () => {
+  it('rejects truncated PNG and cuts trailing data after IEND', () => {
     expect(stripMetadata(png().subarray(0, 30), 'image/png')).toBeNull();
-    expect(stripMetadata(Buffer.concat([png(), Buffer.from('zz')]), 'image/png')).toBeNull();
+    expect(stripMetadata(Buffer.concat([png(), Buffer.from('zz')]), 'image/png')!.equals(png())).toBe(true);
   });
 
   it('drops JPEG APP1/COM segments, keeps JFIF and scan data', () => {
@@ -119,9 +119,10 @@ describe('image sniffing and metadata stripping', () => {
     };
     const src = Buffer.concat([
       Buffer.from([0xff, 0xd8]),
-      seg(0xe0, Buffer.from('JFIF\0')),
+      seg(0xe0, Buffer.concat([Buffer.from('JFIF\0'), Buffer.from([1, 1, 0, 0, 1, 0, 1, 0, 0])])),
       seg(0xe1, Buffer.from('Exif\0\0GPS-DATA')),
       seg(0xfe, Buffer.from('comment')),
+      seg(0xc0, Buffer.from([8, 0, 8, 0, 8, 0])),
       seg(0xda, Buffer.from([1, 1, 0])),
       Buffer.from('scan-data'),
       Buffer.from([0xff, 0xd9]),

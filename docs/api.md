@@ -27,7 +27,19 @@ All three: Platform Admin only (401 unauthenticated, 403 Institution Admin); PAT
 GET/PATCH/logo: Institution Admin only (401 unauthenticated, 403 Platform Admin); PATCH and POST need the CSRF header. The institution is always the session's; ids or tenant hints in the body, query or headers are ignored or rejected.
 
 ## Holders (IA)
-GET/POST /holders; GET/PATCH /holders/:id; POST /holders/:id/photo (multipart, EXIF stripped, photoSha256 stored).
+Institution Admin only (401 unauthenticated, 403 Platform Admin); mutating routes need the CSRF header. The institution is always the session's. Another tenant's holder id, an unknown id and a malformed id are all 404 `NOT_FOUND` with the same body. Responses are `Cache-Control: no-store`.
+Holder view: `{id, fullName, externalId, email, hasPhoto, photoSha256, credentialCount, createdAt, updatedAt, photoUrl?}`. The storage key is never returned. `photoSha256` is the SHA-256 (hex) of the stored, metadata-stripped photo bytes. `photoUrl` is a signed GET URL valid 300 s, present only on single-holder responses (GET/PATCH/photo) when the holder has a photo and storage is configured.
+
+| Route | Behaviour |
+|---|---|
+| GET /holders | `?q=` (case-insensitive substring of name, external id or email; max 100 chars; `%` and `_` are literal), `?limit=` (1-200, default 50), `?offset=`. Returns `{items, total, limit, offset}` newest first. Other query parameters: 400 `UNKNOWN_PROPERTY` |
+| POST /holders | `{fullName, externalId?, email?}` -> 201 holder. `fullName` required, 1-200 chars, trimmed (400 `INVALID_FULL_NAME`). `externalId` 1-100 chars or `null` (400 `INVALID_EXTERNAL_ID`), unique per institution (409 `DUPLICATE_EXTERNAL_ID`). `email` valid address, trimmed and lower-cased, or `null` (400 `INVALID_EMAIL`). Any other property (`institutionId`, `id`, `photoKey`, ...): 400 `UNKNOWN_PROPERTY` |
+| GET /holders/:id | holder with `photoUrl` |
+| PATCH /holders/:id | non-empty subset of `{fullName, externalId, email}`; same validation; `null` clears `externalId` and `email`; empty body 400 |
+| DELETE /holders/:id | 204. 409 `HOLDER_HAS_CREDENTIALS` when the holder has any credential in any status (credentials are never deleted). The photo object is removed after the delete |
+| POST /holders/:id/photo | `multipart/form-data`, exactly one file part named `file`, no text fields. Same rules as the logo: type from magic bytes (415 `UNSUPPORTED_IMAGE_TYPE`); damaged file, bad PNG CRC, dimensions over 10 000 px per side or 40 MP, or empty: 400; over `PHOTO_MAX_BYTES` (default 2 MB): 413; not multipart: 415. Metadata is stripped and trailing data cut (see Image handling), the SHA-256 of the stored bytes is saved as `photoSha256`, the object goes to the private bucket under `institutions/<institutionId>/holders/<holderId>/photo/<random uuid>.<png or jpg>`, and a previous photo object is deleted. Returns the holder. The holder is checked first (404 before the body is read). Storage not configured or failing: 503 `STORAGE_UNAVAILABLE`, photo unchanged |
+
+Image handling (logo and photo): PNG keeps only IHDR, PLTE, tRNS, IDAT, IEND, gAMA, sRGB; other ancillary chunks are dropped, an unknown critical chunk is rejected, every CRC is verified, IDAT must be contiguous, bytes after IEND are cut. JPEG: EXIF/XMP/other APPn and comments are dropped everywhere (including between scans), JFIF is reduced to its 16-byte header (no thumbnail), ICC and Adobe segments are kept, a frame header and at least one scan are required, and everything after EOI is cut. See ADR 0010.
 
 ## Credential types (IA)
 GET/POST /credential-types: `{code, name, kind: ID_CARD|CERTIFICATE, attributes[], defaultValidityDays}`.
