@@ -40,7 +40,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: invite accept, password reset (request/confirm), env-configurable per-IP/per-account login and reset rate limits, sessions killed on reset, withLookup allowlist, ADR 0005. 82 api + 88 db tests pass; review ship. Follow-ups: T-011 must implement AccountMailQueue (never log job payload); T-024 audit entries for invite/reset; shared Postgres rate-limit counters before multi-instance.
 - [x] T-011 [owner: igaro-worker] [deps: T-005, T-002] Worker scaffold (pg-boss) and invite/reset email jobs to Mailpit
   - Done: pg-boss worker, account-mail handler (SMTP/Mailpit), PgBossAccountMailQueue producer behind ACCOUNT_MAIL_QUEUE=pgboss (default noop), ADR 0006; 31 worker + 83 api tests pass; review ship. Follow-ups before enabling in prod: igaro_worker role + pre-created pg-boss schema (platform), updateQueue after createQueue, current_user owner check, INVITE_TTL vs 7-day retention.
-- [ ] T-012 [owner: igaro-qa] [deps: T-006, T-009] Cross-tenant test harness and RLS/trigger/append-only DB tests
+- [x] T-012 [owner: igaro-qa] [deps: T-006, T-009] Cross-tenant test harness and RLS/trigger/append-only DB tests
+  - Done: shared harness `@igaro/db/testing` (scratch schema, tenants A/B, igaro_app sessions); 83 db + 2 api tests prove cross-tenant isolation on all 15 tables and append-only audit; review ship. Follow-ups: positive-control UPDATE tests, exclude src/testing from build tsconfig.
 - [ ] T-013 [owner: igaro-security-reviewer] [deps: T-010, T-012] W1 security review against invariants and docs/threat-model.md
 
 ## W2 Institutions, keys, holders, types
