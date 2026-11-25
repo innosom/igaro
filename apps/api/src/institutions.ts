@@ -12,6 +12,7 @@ import { generateSigningKey } from '@igaro/core';
 import { newOneTimeToken, normalizeEmail, type AccountService } from './account.js';
 import type { AuthSession } from './auth.js';
 import { isUuid, type Db, type PlatformSession } from './db.js';
+import { appendAudit } from './audit.js';
 import { AppError, NotFoundError } from './errors.js';
 
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/; // 3-40 chars, no leading/trailing hyphen
@@ -75,6 +76,8 @@ export interface InstitutionServiceOptions {
   /** 32-byte master key (key-encryption key). Without it creation is refused with 503. */
   masterKey: Buffer | undefined;
   log?: FastifyBaseLogger;
+  /** Keyed IP hash for audit entries (ADR 0003). Without it entries store no IP. */
+  hashIp?: (ip: string | undefined) => string | undefined;
 }
 
 export class InstitutionService {
@@ -136,6 +139,7 @@ export class InstitutionService {
   async create(
     scope: PlatformSession,
     input: { name: string; slug: string; adminEmail: string },
+    ip?: string,
   ): Promise<{ institution: InstitutionView; inviteQueued: boolean }> {
     const masterKey = this.opts.masterKey;
     if (!masterKey) {
@@ -158,6 +162,15 @@ export class InstitutionService {
         );
         await this.insertActiveKey(c, id, masterKey);
         const expiresAt = await this.account.insertInvite(c, id, email, token);
+        await appendAudit(c, {
+          institutionId: id,
+          actorId: scope.userId,
+          action: 'institution.created',
+          targetType: 'institution',
+          targetId: id,
+          metadata: { slug: input.slug },
+          ip: this.opts.hashIp?.(ip),
+        });
         const row = (await c.query<InstitutionRow>(`${SELECT_VIEW} WHERE i.id = $1`, [id])).rows[0]!;
         return { institution: toView(row), expiresAt };
       });
@@ -214,6 +227,8 @@ export class InstitutionService {
     scope: PlatformSession,
     id: string,
     status: InstitutionStatus,
+    reason?: string,
+    ip?: string,
   ): Promise<{ institution: InstitutionView; previous: InstitutionStatus }> {
     if (!isUuid(id)) throw new NotFoundError();
     return this.db.withTenant(scope, async (c) => {
@@ -228,6 +243,15 @@ export class InstitutionService {
           id,
           status,
         ]);
+        await appendAudit(c, {
+          institutionId: id,
+          actorId: scope.userId,
+          action: status === 'SUSPENDED' ? 'institution.suspended' : 'institution.reinstated',
+          targetType: 'institution',
+          targetId: id,
+          metadata: { from: previous, to: status, ...(reason ? { reason } : {}) },
+          ip: this.opts.hashIp?.(ip),
+        });
       }
       const row = (await c.query<InstitutionRow>(`${SELECT_VIEW} WHERE i.id = $1`, [id])).rows[0]!;
       return { institution: toView(row), previous };
@@ -246,6 +270,11 @@ const text = (v: unknown, max: number): string => {
   if (typeof v !== 'string') throw badRequest();
   const t = v.trim();
   if (t.length === 0 || t.length > max) throw badRequest();
+  // NUL / control characters and lone surrogates cannot be stored as JSONB (audit metadata).
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(t) || /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(t)) {
+    throw badRequest();
+  }
   return t;
 };
 
@@ -289,8 +318,7 @@ export function registerInstitutions(
     if (!EMAIL_RE.test(adminEmail)) throw new AppError(400, 'INVALID_EMAIL', 'Invalid email address');
 
     const scope = platformScope(req);
-    const out = await svc.create(scope, { name, slug, adminEmail });
-    // No audit mechanism exists yet (T-024). Structured log only; no email, no token, no key data.
+    const out = await svc.create(scope, { name, slug, adminEmail }, req.ip);
     log.info(
       { event: 'institution.created', actorId: scope.userId, institutionId: out.institution.id },
       'institution created',
@@ -311,10 +339,9 @@ export function registerInstitutions(
       reason = text(b.reason, MAX_REASON);
     }
     const scope = platformScope(req);
-    const out = await svc.setStatus(scope, id, b.status);
+    const out = await svc.setStatus(scope, id, b.status, reason, req.ip);
     if (out.previous !== b.status) {
-      // TODO(T-024): replace with an audit_logs entry (hash-chained, same transaction). Until then the
-      // reason is recorded only in this structured log line.
+      // The reason lives in the hash-chained audit log (same transaction), not in the log line.
       log.info(
         {
           event: 'institution.status_changed',
@@ -322,7 +349,6 @@ export function registerInstitutions(
           institutionId: id,
           from: out.previous,
           to: b.status,
-          reason,
         },
         'institution status changed',
       );
