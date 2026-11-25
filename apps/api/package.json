@@ -20,6 +20,7 @@
     "pino": "^9"
   },
   "devDependencies": {
+    "@igaro/db": "workspace:^",
     "@types/pg": "^8.23.1"
   }
 }
