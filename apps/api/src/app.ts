@@ -11,6 +11,7 @@ import { registerAuth } from './auth-routes.js';
 import { InstitutionService, registerInstitutions } from './institutions.js';
 import { SigningKeyService, registerSigningKeys } from './signing-keys.js';
 import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institution-profile.js';
+import { registerCredentialTypes } from './credential-types.js';
 import { DEFAULT_PHOTO_MAX_BYTES, registerHolders } from './holders.js';
 import type { ObjectStorage } from './storage.js';
 import { hashIp, loggerOptions } from './logging.js';
@@ -129,6 +130,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           logoMaxBytes: opts.config.logoMaxBytes ?? DEFAULT_LOGO_MAX_BYTES,
           log: app.log,
         });
+        registerCredentialTypes(api, { db: opts.db, log: app.log });
         registerHolders(api, {
           db: opts.db,
           storage: opts.storage,
