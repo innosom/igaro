@@ -8,6 +8,7 @@ import { AppError, RateLimitedError } from './errors.js';
 import type { AccountMailQueue } from './notifications.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
+import { InstitutionService, registerInstitutions } from './institutions.js';
 import { hashIp, loggerOptions } from './logging.js';
 
 // Safe defaults when a caller (tests) does not pass cookie/session config: Secure cookie, 1 h idle, 12 h max.
@@ -25,7 +26,10 @@ export interface BuildAppOptions {
   /** ipHashKey and trustProxy come from loadConfig in production; tests may omit them. */
   config: Pick<Config, 'logLevel'> &
     Partial<
-      Pick<Config, 'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit'>
+      Pick<
+        Config,
+        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey'
+      >
     >;
   db?: Db;
   /** Where invite/reset mail jobs go. Defaults to a no-op until the worker queue exists (T-011). */
@@ -89,6 +93,11 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     async (api) => {
       api.get('/health', async () => ({ status: 'ok' }));
       if (opts.db) {
+        const account = new AccountService(opts.db, {
+          queue: opts.accountMail,
+          tokenTtl: opts.config.tokenTtl,
+          log: app.log,
+        });
         registerAuth(
           api,
           new AuthService(opts.db, {
@@ -96,12 +105,16 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
             session: opts.config.session ?? DEFAULT_SESSION,
             hashIp: (ip) => hashIp(ip, ipHashKey),
           }),
-          new AccountService(opts.db, {
-            queue: opts.accountMail,
-            tokenTtl: opts.config.tokenTtl,
+          account,
+          opts.config.rateLimit ?? DEFAULT_RATE_LIMIT,
+        );
+        registerInstitutions(
+          api,
+          new InstitutionService(opts.db, account, {
+            masterKey: opts.config.masterKey,
             log: app.log,
           }),
-          opts.config.rateLimit ?? DEFAULT_RATE_LIMIT,
+          app.log,
         );
       }
     },

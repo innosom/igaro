@@ -48,7 +48,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 ## W2 Institutions, keys, holders, types
 - [x] T-014 [owner: igaro-crypto-core] [deps: T-001] AES-256-GCM key wrapping and Ed25519 key pair generation with kid
   - Done: packages/core/src/keys.ts (generateSigningKey, wrapSecret/unwrapSecret with kid as AAD, parseMasterKey, publicKeyFromRaw); 12 core tests pass; review ship, 0 Critical/High/Medium. Lows: envelope has no master-key id (record in ADR before KMS), lenient base64 parsing, add known-answer vector for igaro.key.v1, API must retry on kid collision and never cache unwrapped keys.
-- [ ] T-015 [owner: igaro-api] [deps: T-010, T-011, T-014] Platform admin: create/list institutions, suspend/unsuspend, invite first admin; per-institution key generation
+- [x] T-015 [owner: igaro-api] [deps: T-010, T-011, T-014] Platform admin: create/list institutions, suspend/unsuspend, invite first admin; per-institution key generation
+  - Done: apps/api/src/institutions.ts (GET/POST /institutions, PATCH /institutions/:id/status; key generated+wrapped, invite hash-only, one tx); 99 API tests pass; review ship, 0 Critical/High. Follow-ups: T-024 must audit institution create/suspend/reinstate (TODO(T-024)); ADR 0007 M1-M3 must land before ACCOUNT_MAIL_QUEUE=pgboss outside dev; Lows: inviteQueued true under noop queue, reserved slugs, name control chars, cursor DateStyle.
 - [ ] T-016 [owner: igaro-api] [deps: T-015] Own institution GET/PATCH (branding, public-field settings) and logo upload to private storage
 - [ ] T-017 [owner: igaro-api] [deps: T-015] Signing key rotation (old key RETIRED) and mark-compromised
 - [ ] T-018 [owner: igaro-api] [deps: T-015] Holders CRUD, photo upload with EXIF strip and SHA-256 photoSha256
@@ -59,7 +60,7 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 ## W3 Trust core, issuance, lifecycle, audit
 - [ ] T-022 [owner: igaro-crypto-core] [deps: T-014] JCS canonicalize, SHA-256 dataHash, Ed25519 sign/verify with domain prefix, payload schema igaro.credential.v1, golden tests
 - [ ] T-023 [owner: igaro-crypto-core] [deps: T-022] Lifecycle state machine, audit hash-chain helpers, AnchorService and NoopAnchorService
-- [ ] T-024 [owner: igaro-api] [deps: T-023, T-006, T-008] Audit log service: per-institution DB lock, hash chain, append-only writes
+- [ ] T-024 [owner: igaro-api] [deps: T-023, T-006, T-008] Audit log service: per-institution DB lock, hash chain, append-only writes; also audit institution create/suspend/reinstate from T-015
 - [ ] T-025 [owner: igaro-api] [deps: T-022, T-024, T-018, T-019, T-017] Single issuance in one transaction (payload, salt, sign, ACTIVE, event, audit, tokens, credential number)
 - [ ] T-026 [owner: igaro-api] [deps: T-025] Suspend, reinstate, revoke (reasons required), reissue (SUPERSEDED link) via credential_events
 - [ ] T-027 [owner: igaro-api] [deps: T-025] Credentials list/get with search and filter, dashboard stats, audit-logs, verify-chain endpoints

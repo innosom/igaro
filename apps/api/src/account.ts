@@ -7,6 +7,7 @@
 // the return value of issue functions and in AccountMailQueue jobs; they are never logged.
 import { randomBytes } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
+import type { PoolClient } from 'pg';
 import { hashPassword, setPasswordAndKillSessions, sha256Hex } from './auth.js';
 import { DEFAULT_TOKEN_TTL, type Config } from './config.js';
 import { isUuid, type Db, type Session } from './db.js';
@@ -70,17 +71,46 @@ export class AccountService {
     const institutionId = scope.kind === 'tenant' ? scope.institutionId : args.institutionId;
     if (!institutionId || !isUuid(institutionId)) throw new TypeError('institution required');
     const token = newOneTimeToken();
-    const expiresAt = await this.db.withTenant(scope, async (c) => {
-      const r = await c.query<{ expires_at: Date }>(
-        `INSERT INTO invites (id, institution_id, email, token_hash, expires_at)
-         VALUES (gen_random_uuid(), $1, $2, $3, now() + make_interval(secs => $4))
-         RETURNING expires_at`,
-        [institutionId, email, hashOneTimeToken(token), this.ttl.inviteSeconds],
-      );
-      return r.rows[0]!.expires_at;
-    });
-    await this.queue.enqueue({ kind: 'INVITE', to: email, token, expiresAt, institutionId });
+    const expiresAt = await this.db.withTenant(scope, (c) =>
+      this.insertInvite(c, institutionId, email, token),
+    );
+    await this.sendInvite({ email, token, expiresAt, institutionId });
     return { expiresAt };
+  }
+
+  /**
+   * Insert an invite row inside a caller-owned transaction (platform scope for the first admin).
+   * Only SHA-256(token) is stored. The caller enqueues the mail with sendInvite AFTER commit.
+   */
+  async insertInvite(
+    c: PoolClient,
+    institutionId: string,
+    email: string,
+    token: string,
+  ): Promise<Date> {
+    const r = await c.query<{ expires_at: Date }>(
+      `INSERT INTO invites (id, institution_id, email, token_hash, expires_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, now() + make_interval(secs => $4))
+       RETURNING expires_at`,
+      [institutionId, normalizeEmail(email), hashOneTimeToken(token), this.ttl.inviteSeconds],
+    );
+    return r.rows[0]!.expires_at;
+  }
+
+  /** Enqueue the invite mail carrying the raw token (never logged). Call after the invite committed. */
+  async sendInvite(args: {
+    email: string;
+    token: string;
+    expiresAt: Date;
+    institutionId: string;
+  }): Promise<void> {
+    await this.queue.enqueue({
+      kind: 'INVITE',
+      to: normalizeEmail(args.email),
+      token: args.token,
+      expiresAt: args.expiresAt,
+      institutionId: args.institutionId,
+    });
   }
 
   /**
