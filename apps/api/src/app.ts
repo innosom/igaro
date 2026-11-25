@@ -11,6 +11,7 @@ import { registerAuth } from './auth-routes.js';
 import { InstitutionService, registerInstitutions } from './institutions.js';
 import { SigningKeyService, registerSigningKeys } from './signing-keys.js';
 import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institution-profile.js';
+import { DEFAULT_PHOTO_MAX_BYTES, registerHolders } from './holders.js';
 import type { ObjectStorage } from './storage.js';
 import { hashIp, loggerOptions } from './logging.js';
 
@@ -31,7 +32,7 @@ export interface BuildAppOptions {
     Partial<
       Pick<
         Config,
-        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'logoMaxBytes'
+        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'logoMaxBytes' | 'photoMaxBytes'
       >
     >;
   db?: Db;
@@ -126,6 +127,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           db: opts.db,
           storage: opts.storage,
           logoMaxBytes: opts.config.logoMaxBytes ?? DEFAULT_LOGO_MAX_BYTES,
+          log: app.log,
+        });
+        registerHolders(api, {
+          db: opts.db,
+          storage: opts.storage,
+          photoMaxBytes: opts.config.photoMaxBytes ?? DEFAULT_PHOTO_MAX_BYTES,
           log: app.log,
         });
       }

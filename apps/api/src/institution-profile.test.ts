@@ -10,6 +10,7 @@ import { buildApp } from './app.js';
 import { csrfTokenFor, hashPassword } from './auth.js';
 import { Db } from './db.js';
 import { MemoryObjectStorage } from './storage.js';
+import { JPEG, PNG } from './test-images.js';
 
 const url = process.env.DATABASE_URL;
 const migrationsDir = new URL('../../../packages/db/prisma/migrations/', import.meta.url);
@@ -28,26 +29,6 @@ const MAX = 2048;
 interface Client {
   headers: Record<string, string>;
 }
-
-const chunk = (type: string, data: Buffer) => {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  return Buffer.concat([len, Buffer.from(type, 'latin1'), data, Buffer.alloc(4)]);
-};
-const PNG = (extraIdat = 0, ...meta: [string, string][]) =>
-  Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', Buffer.alloc(13)),
-    ...meta.map(([t, d]) => chunk(t, Buffer.from(d))),
-    chunk('IDAT', Buffer.alloc(6 + extraIdat, 7)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-const JPEG = Buffer.concat([
-  Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x07, 0x4a, 0x46, 0x49, 0x46, 0x00]),
-  Buffer.from([0xff, 0xda, 0x00, 0x03, 0x00]),
-  Buffer.from('scan'),
-  Buffer.from([0xff, 0xd9]),
-]);
 
 const multipartBody = (
   parts: { name: string; filename?: string; type?: string; data: Buffer | string }[],
@@ -385,7 +366,7 @@ describe.skipIf(!url)('own institution profile (needs Postgres)', () => {
     });
 
     it('accepts JPEG', async () => {
-      const res = await upload(a, [{ name: 'file', filename: 'l.jpg', type: 'image/jpeg', data: JPEG }]);
+      const res = await upload(a, [{ name: 'file', filename: 'l.jpg', type: 'image/jpeg', data: JPEG() }]);
       expect(res.statusCode).toBe(200);
       const key = (await row(INST_A)).logo_key as string;
       expect(key).toMatch(/\.jpg$/);

@@ -36,6 +36,8 @@ export interface Config {
   s3: S3Config | undefined;
   /** Largest accepted logo upload in bytes (LOGO_MAX_BYTES, default 1 MB). */
   logoMaxBytes: number;
+  /** Largest accepted holder photo upload in bytes (PHOTO_MAX_BYTES, default 2 MB). */
+  photoMaxBytes: number;
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
@@ -311,9 +313,12 @@ export function loadConfig(env: Env = process.env): Config {
 
   const logoMaxBytes = parseCount(env.LOGO_MAX_BYTES, 'LOGO_MAX_BYTES', 1024 * 1024, 10 * 1024 * 1024);
 
+  const photoMaxBytes = parseCount(env.PHOTO_MAX_BYTES, 'PHOTO_MAX_BYTES', 2 * 1024 * 1024, 10 * 1024 * 1024);
+
   return {
     s3: parseS3(env, nodeEnv),
     logoMaxBytes,
+    photoMaxBytes,
     accountMail,
     session,
     tokenTtl,

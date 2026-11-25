@@ -7,8 +7,9 @@ import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify
 import type { AuthSession } from './auth.js';
 import type { Db, TenantSession } from './db.js';
 import { AppError, NotFoundError } from './errors.js';
-import { extensionOf, sniffImage, stripMetadata } from './image.js';
+import { extensionOf } from './image.js';
 import { StorageError, type ObjectStorage } from './storage.js';
+import { readImageUpload } from './uploads.js';
 
 /**
  * Optional holder fields the public verification page may show. Name and status always appear and are
@@ -222,29 +223,8 @@ export function registerInstitutionProfile(app: FastifyInstance, o: ProfileRoute
       void reply.header('Cache-Control', 'no-store');
       const scope = tenantScope(req);
       if (!o.storage) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'File storage is not available');
-      if (!req.isMultipart()) throw new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected multipart/form-data');
-
-      let raw: Buffer;
-      try {
-        const part = await req.file();
-        if (!part || part.fieldname !== 'file') throw badRequest('BAD_REQUEST', 'Expected one file field named "file"');
-        raw = await part.toBuffer();
-        if (part.file.truncated) throw new AppError(413, 'PAYLOAD_TOO_LARGE', 'Logo is too large');
-      } catch (e) {
-        if (e instanceof AppError) throw e;
-        const code = (e as { code?: string }).code;
-        if (code === 'FST_REQ_FILE_TOO_LARGE') {
-          throw new AppError(413, 'PAYLOAD_TOO_LARGE', 'Logo is too large');
-        }
-        throw badRequest('BAD_REQUEST', 'Invalid upload');
-      }
-      if (raw.length === 0) throw badRequest('BAD_REQUEST', 'Empty file');
-
       // The type comes from the bytes, never from the client's content-type or file name.
-      const type = sniffImage(raw);
-      if (!type) throw new AppError(415, 'UNSUPPORTED_IMAGE_TYPE', 'Logo must be a PNG or JPEG image');
-      const clean = stripMetadata(raw, type);
-      if (!clean) throw badRequest('INVALID_IMAGE', 'The image file is damaged');
+      const { type, bytes: clean } = await readImageUpload(req, 'Logo');
 
       // Server-generated key; the only variable parts are the session's institution id and a random UUID.
       const key = `institutions/${scope.institutionId}/logo/${randomUUID()}.${extensionOf(type)}`;

@@ -146,6 +146,9 @@ describe('loadConfig', () => {
     const c = loadConfig(good);
     expect(c.s3).toBeUndefined();
     expect(c.logoMaxBytes).toBe(1024 * 1024);
+    expect(c.photoMaxBytes).toBe(2 * 1024 * 1024);
+    expect(loadConfig({ ...good, PHOTO_MAX_BYTES: '4096' }).photoMaxBytes).toBe(4096);
+    expect(() => loadConfig({ ...good, PHOTO_MAX_BYTES: 'big' })).toThrow(/PHOTO_MAX_BYTES/);
     const s3 = {
       S3_ENDPOINT: 'http://127.0.0.1:9000',
       S3_BUCKET: 'igaro',
