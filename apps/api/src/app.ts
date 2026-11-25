@@ -9,6 +9,8 @@ import type { AccountMailQueue } from './notifications.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
 import { InstitutionService, registerInstitutions } from './institutions.js';
+import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institution-profile.js';
+import type { ObjectStorage } from './storage.js';
 import { hashIp, loggerOptions } from './logging.js';
 
 // Safe defaults when a caller (tests) does not pass cookie/session config: Secure cookie, 1 h idle, 12 h max.
@@ -28,12 +30,14 @@ export interface BuildAppOptions {
     Partial<
       Pick<
         Config,
-        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey'
+        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'logoMaxBytes'
       >
     >;
   db?: Db;
   /** Where invite/reset mail jobs go. Defaults to a no-op until the worker queue exists (T-011). */
   accountMail?: AccountMailQueue;
+  /** Private object storage for logos. Without it POST /institution/logo answers 503. */
+  storage?: ObjectStorage;
   /** Log destination; tests capture logs here. */
   logStream?: DestinationStream;
 }
@@ -116,6 +120,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           }),
           app.log,
         );
+        registerInstitutionProfile(api, {
+          db: opts.db,
+          storage: opts.storage,
+          logoMaxBytes: opts.config.logoMaxBytes ?? DEFAULT_LOGO_MAX_BYTES,
+          log: app.log,
+        });
       }
     },
     { prefix: API_PREFIX },
