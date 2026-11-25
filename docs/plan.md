@@ -38,7 +38,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: /auth/login, /logout, /me; Argon2id, SHA-256-hashed 256-bit cookie sessions (idle 60m/max 12h), derived CSRF header, app.authenticate/requireRole, sliding-expiry migration, ADR 0004. 53 api + 88 db tests pass; review ship. Follow-ups for T-010: rate limiting, kill sessions on password change, restrict withLookup keys to an allowlist, consider __Host- cookie, precompute dummy hash, expired-session purge job.
 - [x] T-010 [owner: igaro-api] [deps: T-009] Invite accept, password reset, login rate limiting
   - Done: invite accept, password reset (request/confirm), env-configurable per-IP/per-account login and reset rate limits, sessions killed on reset, withLookup allowlist, ADR 0005. 82 api + 88 db tests pass; review ship. Follow-ups: T-011 must implement AccountMailQueue (never log job payload); T-024 audit entries for invite/reset; shared Postgres rate-limit counters before multi-instance.
-- [ ] T-011 [owner: igaro-worker] [deps: T-005, T-002] Worker scaffold (pg-boss) and invite/reset email jobs to Mailpit
+- [x] T-011 [owner: igaro-worker] [deps: T-005, T-002] Worker scaffold (pg-boss) and invite/reset email jobs to Mailpit
+  - Done: pg-boss worker, account-mail handler (SMTP/Mailpit), PgBossAccountMailQueue producer behind ACCOUNT_MAIL_QUEUE=pgboss (default noop), ADR 0006; 31 worker + 83 api tests pass; review ship. Follow-ups before enabling in prod: igaro_worker role + pre-created pg-boss schema (platform), updateQueue after createQueue, current_user owner check, INVITE_TTL vs 7-day retention.
 - [ ] T-012 [owner: igaro-qa] [deps: T-006, T-009] Cross-tenant test harness and RLS/trigger/append-only DB tests
 - [ ] T-013 [owner: igaro-security-reviewer] [deps: T-010, T-012] W1 security review against invariants and docs/threat-model.md
 

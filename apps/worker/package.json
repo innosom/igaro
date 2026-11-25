@@ -5,10 +5,33 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./producer": {
+      "types": "./src/producer.ts",
+      "default": "./dist/producer.js"
+    }
+  },
   "scripts": {
+    "start": "node dist/main.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "nodemailer": "^10.6.1",
+    "pg-boss": "^12.39.0",
+    "pino": "^9"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/smtp-server": "^3.5.13",
+    "pg": "^8.23.1",
+    "smtp-server": "^3.21.7"
   }
 }
