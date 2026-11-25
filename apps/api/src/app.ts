@@ -9,6 +9,7 @@ import type { AccountMailQueue } from './notifications.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
 import { InstitutionService, registerInstitutions } from './institutions.js';
+import { SigningKeyService, registerSigningKeys } from './signing-keys.js';
 import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institution-profile.js';
 import type { ObjectStorage } from './storage.js';
 import { hashIp, loggerOptions } from './logging.js';
@@ -120,6 +121,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           }),
           app.log,
         );
+        registerSigningKeys(api, new SigningKeyService(opts.db, opts.config.masterKey), app.log);
         registerInstitutionProfile(api, {
           db: opts.db,
           storage: opts.storage,
