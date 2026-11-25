@@ -59,7 +59,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: apps/api/src/holders.ts (GET/POST /holders, GET/PATCH/DELETE /holders/:id, POST /holders/:id/photo), uploads.ts (shared upload reader), PHOTO_MAX_BYTES; image.ts hardened first (T-016 reviewer Mediums fixed: JPEG strips between scans and cuts at EOI, PNG allow-list with CRC and dimension caps; also fixed an ICC_PROFILE match that never matched); ADR 0010; no migration needed. Follow-ups: T-024 audit (TODO(T-024)); T-039 must account for a photo replacement deleting the old object.
 - [x] T-019 [owner: igaro-api] [deps: T-015] Credential types CRUD with attribute lists; STUDENT_ID and CERTIFICATE templates
   - Done: apps/api/src/credential-types.ts (GET/POST /credential-types, /templates, GET/PATCH/DELETE /:id), ADR 0011, new tests; all workspace tests pass; review ship, 0 Critical/High. Follow-ups: T-024 audit (reviewer M1); T-020 should make the 409 TYPE_HAS_CREDENTIALS test build a real credential row (L1); T-025 must re-validate stored schemas and use Object.hasOwn (L2, L4).
-- [ ] T-020 [owner: igaro-qa] [deps: T-016, T-017, T-018, T-019] Cross-tenant 404 tests for institutions, keys, holders, types
+- [x] T-020 [owner: igaro-qa] [deps: T-016, T-017, T-018, T-019] Cross-tenant 404 tests for institutions, keys, holders, types
+  - Done: apps/api/src/cross-tenant.test.ts (5 tests, real routes as igaro_app with RLS): institutions, own-institution session scoping, keys (well-formed kids plus positive control), holders incl. photo, types incl. a real credential row for the 409 guard (closes T-019 L1). Follow-ups: swap fixture credential for real issuance after T-025; add rotate/logo scoping checks.
 - [ ] T-021 [owner: igaro-security-reviewer] [deps: T-020] W2 review (key custody, photo handling, tenancy)
 
 ## W3 Trust core, issuance, lifecycle, audit
