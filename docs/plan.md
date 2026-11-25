@@ -42,7 +42,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: pg-boss worker, account-mail handler (SMTP/Mailpit), PgBossAccountMailQueue producer behind ACCOUNT_MAIL_QUEUE=pgboss (default noop), ADR 0006; 31 worker + 83 api tests pass; review ship. Follow-ups before enabling in prod: igaro_worker role + pre-created pg-boss schema (platform), updateQueue after createQueue, current_user owner check, INVITE_TTL vs 7-day retention.
 - [x] T-012 [owner: igaro-qa] [deps: T-006, T-009] Cross-tenant test harness and RLS/trigger/append-only DB tests
   - Done: shared harness `@igaro/db/testing` (scratch schema, tenants A/B, igaro_app sessions); 83 db + 2 api tests prove cross-tenant isolation on all 15 tables and append-only audit; review ship. Follow-ups: positive-control UPDATE tests, exclude src/testing from build tsconfig.
-- [ ] T-013 [owner: igaro-security-reviewer] [deps: T-010, T-012] W1 security review against invariants and docs/threat-model.md
+- [x] T-013 [owner: igaro-security-reviewer] [deps: T-010, T-012] W1 security review against invariants and docs/threat-model.md
+  - Done: verdict ship, 0 Critical/High. Mediums (ADR 0007): M1 startup role check (api+worker), M2 igaro_worker role/pg-boss schema, M3 updateQueue after createQueue (all before T-015 enables real mail); M4 tenant-scoped key rotation policies in T-017. Lows: reset-request timing, used_at reset trigger, platform-scope comment in apps/api/src/db.ts, in-process rate limits, invite email validation, no CORS in T-035, unpinned compose images, exclude src/testing from build, positive-control UPDATE tests, auth audit entries (T-024). Tests not run in review sandbox.
 
 ## W2 Institutions, keys, holders, types
 - [ ] T-014 [owner: igaro-crypto-core] [deps: T-001] AES-256-GCM key wrapping and Ed25519 key pair generation with kid
