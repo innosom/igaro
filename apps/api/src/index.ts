@@ -5,3 +5,5 @@ export { Db, isUuid } from './db.js';
 export type { Session, TenantSession, PlatformSession } from './db.js';
 export { AppError, NotFoundError } from './errors.js';
 export { HolderRepository } from './repositories.js';
+export { AuthService, csrfTokenFor, hashPassword, CSRF_HEADER } from './auth.js';
+export type { AuthSession, AuthMe, Role } from './auth.js';
