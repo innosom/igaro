@@ -54,7 +54,7 @@ Editing attributes never changes issued credentials: each signed payload carries
 
 ## Credentials (IA)
 | GET /credentials | filter `status, type, q`; status is computed (EXPIRED) |
-| POST /credentials | `{holderId, credentialTypeCode, attributes, expiresAt?}` -> signed ACTIVE credential |
+| POST /credentials | `{holderId, credentialTypeCode, attributes, expiresAt?}` -> 201 signed ACTIVE credential (`id, credentialNumber, payload, dataHash, signature, issuerKeyId, verificationToken, holderToken`; `holderToken` is returned only here). 404 unknown/foreign holder or type; 409 `HOLDER_PHOTO_REQUIRED`, `NO_ACTIVE_KEY`, `INSTITUTION_SUSPENDED`; 503 `KEY_CUSTODY_UNAVAILABLE`. See ADR 0016 |
 | GET /credentials/:id | includes events |
 | POST /credentials/:id/suspend | `{reason}` required |
 | POST /credentials/:id/reinstate | |

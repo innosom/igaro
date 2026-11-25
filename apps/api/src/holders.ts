@@ -243,7 +243,11 @@ export class HolderRepository {
     }
   }
 
-  /** Point the holder at a new photo object; returns the previous key (to delete after commit). */
+  /**
+   * Point the holder at a new photo object. Returns the previous key only when it is safe to delete after commit:
+   * an object that a signed credential payload commits to (holder.photoSha256), or that is the same object as the
+   * new one, is kept (T-018 review M1, ADR 0016). Keys are content-addressed, so card/verify can find it by hash.
+   */
   async setPhoto(
     id: string,
     key: string,
@@ -251,19 +255,30 @@ export class HolderRepository {
   ): Promise<{ view: HolderView; previousKey: string | null }> {
     if (!isUuid(id)) throw new NotFoundError();
     return this.db.withTenant(this.session, async (c) => {
-      const cur = await c.query<{ photo_key: string | null }>(
-        `SELECT photo_key FROM credential_holders
+      const cur = await c.query<{ photo_key: string | null; photo_sha256: string | null }>(
+        `SELECT photo_key, photo_sha256 FROM credential_holders
           WHERE id = $1 AND institution_id = app_institution_id() FOR UPDATE`,
         [id],
       );
-      if (!cur.rows[0]) throw new NotFoundError();
+      const prev = cur.rows[0];
+      if (!prev) throw new NotFoundError();
       await c.query(
         `UPDATE credential_holders SET photo_key = $2, photo_sha256 = $3, updated_at = now()
           WHERE id = $1 AND institution_id = app_institution_id()`,
         [id, key, sha256],
       );
+      let deletable = prev.photo_key !== null && prev.photo_key !== key;
+      if (deletable && prev.photo_sha256) {
+        const used = await c.query(
+          `SELECT 1 FROM credentials
+            WHERE holder_id = $1 AND institution_id = app_institution_id()
+              AND payload -> 'holder' ->> 'photoSha256' = $2 LIMIT 1`,
+          [id, prev.photo_sha256],
+        );
+        if (used.rowCount) deletable = false;
+      }
       const r = await c.query<Row>(`${SELECT} WHERE h.id = $1 AND h.institution_id = app_institution_id()`, [id]);
-      return { view: toView(r.rows[0]!), previousKey: cur.rows[0].photo_key };
+      return { view: toView(r.rows[0]!), previousKey: deletable ? prev.photo_key : null };
     });
   }
 
@@ -394,8 +409,8 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
       const { type, bytes } = await readImageUpload(req, 'Photo');
       // Hash of exactly the bytes that are stored (after stripping), as credential payloads commit to it.
       const sha256 = createHash('sha256').update(bytes).digest('hex');
-      // Server-generated key: session institution, holder id (validated uuid) and a random uuid.
-      const key = `institutions/${scope.institutionId}/holders/${id}/photo/${randomUUID()}.${extensionOf(type)}`;
+      // Server-generated, content-addressed key: session institution, holder id (validated uuid), SHA-256 of the bytes.
+      const key = `institutions/${scope.institutionId}/holders/${id}/photo/${sha256}.${extensionOf(type)}`;
       try {
         await o.storage.put(key, bytes, type);
       } catch (e) {
@@ -404,13 +419,9 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
         throw new AppError(503, 'STORAGE_UNAVAILABLE', 'File storage is not available');
       }
 
-      let result: Awaited<ReturnType<HolderRepository['setPhoto']>>;
-      try {
-        result = await repo(req).setPhoto(id, key, sha256);
-      } catch (e) {
-        await o.storage.delete(key).catch(() => undefined);
-        throw e;
-      }
+      // If this fails the new object is left in place: the key is content-addressed, so it may be the very object
+      // the holder or a signed credential already uses (ADR 0016).
+      const result = await repo(req).setPhoto(id, key, sha256);
       if (result.previousKey) {
         await o.storage.delete(result.previousKey).catch(() => {
           o.log.warn({ event: 'holder.photo_cleanup_failed', institutionId: scope.institutionId }, 'old photo not deleted');
