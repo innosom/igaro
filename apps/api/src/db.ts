@@ -28,6 +28,22 @@ export interface DbOptions {
   poolConfig?: pg.PoolConfig;
 }
 
+/**
+ * The only settings an unauthenticated lookup may set. Each matches a narrow SELECT policy in the
+ * init migration (PART 4); anything else is refused so a typo or caller-supplied key cannot widen scope.
+ */
+export const LOOKUP_KEYS = [
+  'app.login_email',
+  'app.session_token_hash',
+  'app.invite_token_hash',
+  'app.reset_token_hash',
+  'app.institution_slug',
+  'app.verification_token',
+  'app.holder_token_hash',
+] as const;
+export type LookupKey = (typeof LOOKUP_KEYS)[number];
+const LOOKUP_KEY_SET: ReadonlySet<string> = new Set(LOOKUP_KEYS);
+
 export class Db {
   readonly pool: pg.Pool;
 
@@ -52,14 +68,16 @@ export class Db {
    * handed on an unauthenticated path.
    */
   async withLookup<T>(
-    settings: Readonly<Record<string, string>>,
+    settings: Readonly<Partial<Record<LookupKey, string>>>,
     fn: (c: pg.PoolClient) => Promise<T>,
   ): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       for (const [k, v] of Object.entries(settings)) {
-        if (!/^app\.[a-z_]+$/.test(k)) throw new TypeError('invalid lookup setting');
+        if (!LOOKUP_KEY_SET.has(k) || typeof v !== 'string') {
+          throw new TypeError('invalid lookup setting');
+        }
         await client.query('SELECT set_config($1, $2, true)', [k, v]);
       }
       const out = await fn(client);

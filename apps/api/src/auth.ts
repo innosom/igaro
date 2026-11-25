@@ -52,10 +52,12 @@ export const newSessionToken = (): string => randomBytes(32).toString('base64url
 
 const unauthenticated = () => new AppError(401, 'UNAUTHENTICATED', 'Authentication required');
 
-// A verification against this hash makes unknown-user and wrong-password paths cost the same.
-let dummyHash: Promise<string> | undefined;
-const getDummyHash = (): Promise<string> =>
-  (dummyHash ??= argonHash(randomBytes(16).toString('hex'), ARGON2ID_PARAMS));
+// A verification against this hash makes unknown-user and wrong-password paths cost the same. It is
+// computed once at module load (from a random password nobody knows), so the first unknown-user
+// login does not pay for it and so look slower than later ones.
+const dummyHash: Promise<string> = argonHash(randomBytes(16).toString('hex'), ARGON2ID_PARAMS);
+dummyHash.catch(() => undefined); // surfaced when awaited; avoids an unhandled-rejection at load
+const getDummyHash = (): Promise<string> => dummyHash;
 
 export async function verifyPassword(
   storedHash: string | null,
@@ -73,6 +75,23 @@ export async function verifyPassword(
 
 export const hashPassword = (password: string): Promise<string> =>
   argonHash(password, ARGON2ID_PARAMS);
+
+/**
+ * Store a new password hash and delete EVERY session of the user, in the caller's transaction (which
+ * must already carry the user's tenant/platform scope). Use for reset, invite accept and any future
+ * change-password endpoint, so a changed password never leaves an old session alive (ADR 0004, 0005).
+ */
+export async function setPasswordAndKillSessions(
+  c: pg.PoolClient,
+  userId: string,
+  passwordHash: string,
+): Promise<void> {
+  await c.query(`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`, [
+    userId,
+    passwordHash,
+  ]);
+  await c.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
+}
 
 // --- cookies -------------------------------------------------------------------------------------
 

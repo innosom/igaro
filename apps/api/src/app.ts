@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { DestinationStream } from 'pino';
-import type { Config } from './config.js';
+import { AccountService } from './account.js';
+import { DEFAULT_RATE_LIMIT, type Config } from './config.js';
 import type { Db } from './db.js';
-import { AppError } from './errors.js';
+import { AppError, RateLimitedError } from './errors.js';
+import type { AccountMailQueue } from './notifications.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
 import { hashIp, loggerOptions } from './logging.js';
@@ -22,8 +24,12 @@ export const API_PREFIX = '/api/v1';
 export interface BuildAppOptions {
   /** ipHashKey and trustProxy come from loadConfig in production; tests may omit them. */
   config: Pick<Config, 'logLevel'> &
-    Partial<Pick<Config, 'ipHashKey' | 'trustProxy' | 'cookie' | 'session'>>;
+    Partial<
+      Pick<Config, 'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit'>
+    >;
   db?: Db;
+  /** Where invite/reset mail jobs go. Defaults to a no-op until the worker queue exists (T-011). */
+  accountMail?: AccountMailQueue;
   /** Log destination; tests capture logs here. */
   logStream?: DestinationStream;
 }
@@ -55,6 +61,9 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   app.decorate('db', opts.db);
 
   app.setErrorHandler((err: FastifyError | AppError, req, reply) => {
+    if (err instanceof RateLimitedError) {
+      void reply.header('Retry-After', String(err.retryAfterSeconds));
+    }
     if (err instanceof AppError) {
       return reply.status(err.statusCode).send(errBody(err.code, err.message));
     }
@@ -87,6 +96,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
             session: opts.config.session ?? DEFAULT_SESSION,
             hashIp: (ip) => hashIp(ip, ipHashKey),
           }),
+          new AccountService(opts.db, {
+            queue: opts.accountMail,
+            tokenTtl: opts.config.tokenTtl,
+            log: app.log,
+          }),
+          opts.config.rateLimit ?? DEFAULT_RATE_LIMIT,
         );
       }
     },
