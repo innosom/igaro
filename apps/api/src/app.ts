@@ -13,6 +13,7 @@ import { SigningKeyService, registerSigningKeys } from './signing-keys.js';
 import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institution-profile.js';
 import { registerCredentialTypes } from './credential-types.js';
 import { CredentialService, registerCredentials } from './credentials.js';
+import { CredentialLifecycleService, registerCredentialLifecycle } from './credential-lifecycle.js';
 import { DEFAULT_PHOTO_MAX_BYTES, registerHolders } from './holders.js';
 import type { ObjectStorage } from './storage.js';
 import { hashIp, loggerOptions } from './logging.js';
@@ -133,11 +134,9 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           log: app.log,
         });
         registerCredentialTypes(api, { db: opts.db, log: app.log });
-        registerCredentials(
-          api,
-          new CredentialService(opts.db, { masterKey: opts.config.masterKey, hashIp: (ip) => hashIp(ip, ipHashKey) }),
-          app.log,
-        );
+        const credentialOpts = { masterKey: opts.config.masterKey, hashIp: (ip: string | undefined) => hashIp(ip, ipHashKey) };
+        registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log);
+        registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log);
         registerHolders(api, {
           db: opts.db,
           storage: opts.storage,

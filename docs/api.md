@@ -56,10 +56,10 @@ Editing attributes never changes issued credentials: each signed payload carries
 | GET /credentials | filter `status, type, q`; status is computed (EXPIRED) |
 | POST /credentials | `{holderId, credentialTypeCode, attributes, expiresAt?}` -> 201 signed ACTIVE credential (`id, credentialNumber, payload, dataHash, signature, issuerKeyId, verificationToken, holderToken`; `holderToken` is returned only here). 404 unknown/foreign holder or type; 409 `HOLDER_PHOTO_REQUIRED`, `NO_ACTIVE_KEY`, `INSTITUTION_SUSPENDED`; 503 `KEY_CUSTODY_UNAVAILABLE`. See ADR 0016 |
 | GET /credentials/:id | includes events |
-| POST /credentials/:id/suspend | `{reason}` required |
-| POST /credentials/:id/reinstate | |
-| POST /credentials/:id/revoke | `{reason}` required; terminal |
-| POST /credentials/:id/reissue | `{attributes?, expiresAt?, reason}`; old -> SUPERSEDED, returns new |
+| POST /credentials/:id/suspend | `{reason}` required (400 `REASON_REQUIRED`). 200 `{id, credentialNumber, status, previousStatus}`; 404 unknown/foreign; 409 `INVALID_TRANSITION`. ADR 0017 |
+| POST /credentials/:id/reinstate | optional `{reason}`; SUSPENDED -> ACTIVE; 409 otherwise |
+| POST /credentials/:id/revoke | `{reason}` required; terminal; ACTIVE only |
+| POST /credentials/:id/reissue | `{reason, attributes?, expiresAt?}` (omitted fields inherited); 201 `{credential, previous}`; ACTIVE old -> SUPERSEDED, REVOKED old stays REVOKED and the new one links to it (`ALREADY_REISSUED` 409 on repeat) |
 | POST /credentials/import | multipart CSV + ZIP; `?dryRun=true` returns preview; otherwise creates batch job (202) |
 | GET /credentials/:id/card.png, card.pdf | rendered card |
 Illegal transitions return 409. Idempotency-Key header supported on issue.
