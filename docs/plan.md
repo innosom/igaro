@@ -46,7 +46,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: verdict ship, 0 Critical/High. Mediums (ADR 0007): M1 startup role check (api+worker), M2 igaro_worker role/pg-boss schema, M3 updateQueue after createQueue (all before T-015 enables real mail); M4 tenant-scoped key rotation policies in T-017. Lows: reset-request timing, used_at reset trigger, platform-scope comment in apps/api/src/db.ts, in-process rate limits, invite email validation, no CORS in T-035, unpinned compose images, exclude src/testing from build, positive-control UPDATE tests, auth audit entries (T-024). Tests not run in review sandbox.
 
 ## W2 Institutions, keys, holders, types
-- [ ] T-014 [owner: igaro-crypto-core] [deps: T-001] AES-256-GCM key wrapping and Ed25519 key pair generation with kid
+- [x] T-014 [owner: igaro-crypto-core] [deps: T-001] AES-256-GCM key wrapping and Ed25519 key pair generation with kid
+  - Done: packages/core/src/keys.ts (generateSigningKey, wrapSecret/unwrapSecret with kid as AAD, parseMasterKey, publicKeyFromRaw); 12 core tests pass; review ship, 0 Critical/High/Medium. Lows: envelope has no master-key id (record in ADR before KMS), lenient base64 parsing, add known-answer vector for igaro.key.v1, API must retry on kid collision and never cache unwrapped keys.
 - [ ] T-015 [owner: igaro-api] [deps: T-010, T-011, T-014] Platform admin: create/list institutions, suspend/unsuspend, invite first admin; per-institution key generation
 - [ ] T-016 [owner: igaro-api] [deps: T-015] Own institution GET/PATCH (branding, public-field settings) and logo upload to private storage
 - [ ] T-017 [owner: igaro-api] [deps: T-015] Signing key rotation (old key RETIRED) and mark-compromised
