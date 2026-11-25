@@ -115,6 +115,13 @@ describe.skipIf(!url)('auth: login, logout, me (needs Postgres at DATABASE_URL)'
         logLevel: 'debug',
         cookie: { name: 'igaro_session', secure: true, sameSite: 'lax', domain: undefined },
         session: { idleSeconds: 1800, maxSeconds: 8 * 3600 },
+        // These tests log in and fail on purpose many times from one address; limits are tested in
+        // account.test.ts.
+        rateLimit: {
+          login: { ipMax: 10000, accountMax: 10000, windowSeconds: 900 },
+          reset: { ipMax: 10000, accountMax: 10000, windowSeconds: 900 },
+          token: { ipMax: 10000, windowSeconds: 900 },
+        },
       },
       db,
       logStream,

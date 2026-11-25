@@ -15,6 +15,29 @@ describe('loadConfig', () => {
     expect(c.cookie).toMatchObject({ secure: false, sameSite: 'lax' });
   });
 
+  it('reads rate limits and token lifetimes from the environment, with safe defaults', () => {
+    const d = loadConfig(good);
+    expect(d.rateLimit.login).toEqual({ ipMax: 30, accountMax: 5, windowSeconds: 900 });
+    expect(d.tokenTtl).toEqual({ inviteSeconds: 72 * 3600, resetSeconds: 3600 });
+    const c = loadConfig({
+      ...good,
+      RATE_LIMIT_LOGIN_IP_MAX: '7',
+      RATE_LIMIT_LOGIN_ACCOUNT_MAX: '2',
+      RATE_LIMIT_RESET_ACCOUNT_MAX: '9',
+      RATE_LIMIT_TOKEN_WINDOW_SECONDS: '60',
+      INVITE_TTL_HOURS: '24',
+      RESET_TTL_MINUTES: '30',
+    });
+    expect(c.rateLimit.login).toMatchObject({ ipMax: 7, accountMax: 2 });
+    expect(c.rateLimit.reset.accountMax).toBe(9);
+    expect(c.rateLimit.token.windowSeconds).toBe(60);
+    expect(c.tokenTtl).toEqual({ inviteSeconds: 24 * 3600, resetSeconds: 1800 });
+    for (const bad of ['0', '-1', 'abc', '1.5']) {
+      expect(() => loadConfig({ ...good, RATE_LIMIT_LOGIN_IP_MAX: bad })).toThrow(ConfigError);
+    }
+    expect(() => loadConfig({ ...good, RESET_TTL_MINUTES: '1' })).toThrow(ConfigError);
+  });
+
   it('requires APP_DATABASE_URL and never echoes its value', () => {
     expect(() => loadConfig({ NODE_ENV: 'test' })).toThrow(ConfigError);
     try {

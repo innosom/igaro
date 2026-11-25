@@ -28,7 +28,28 @@ export interface Config {
   cookie: { name: string; secure: boolean; sameSite: 'lax'; domain: string | undefined };
   /** Session lifetimes in seconds: idle (sliding) timeout and absolute maximum age. */
   session: { idleSeconds: number; maxSeconds: number };
+  /** Lifetimes of single-use invite and password-reset tokens, in seconds (ADR 0005). */
+  tokenTtl: { inviteSeconds: number; resetSeconds: number };
+  rateLimit: RateLimitConfig;
 }
+
+/** Fixed-window limits (ADR 0005). Counts are per process; windows are in seconds. */
+export interface RateLimitConfig {
+  /** Login: every attempt counts per IP; attempts count per account (email) until a success. */
+  login: { ipMax: number; accountMax: number; windowSeconds: number };
+  /** Password-reset requests (a mail is sent per request): per IP and per email address. */
+  reset: { ipMax: number; accountMax: number; windowSeconds: number };
+  /** Invite accept and reset confirm (token endpoints): per IP. */
+  token: { ipMax: number; windowSeconds: number };
+}
+
+export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
+  login: { ipMax: 30, accountMax: 5, windowSeconds: 900 },
+  reset: { ipMax: 10, accountMax: 3, windowSeconds: 3600 },
+  token: { ipMax: 20, windowSeconds: 900 },
+};
+
+export const DEFAULT_TOKEN_TTL = { inviteSeconds: 72 * 3600, resetSeconds: 3600 };
 
 function parseSeconds(
   raw: string | undefined,
@@ -43,6 +64,14 @@ function parseSeconds(
   const n = Number(raw);
   if (n < min || n > max) throw new ConfigError(`${name} must be between ${min} and ${max}`);
   return n * unitSeconds;
+}
+
+function parseCount(raw: string | undefined, name: string, def: number, max = 100000): number {
+  if (raw === undefined || raw === '') return def;
+  if (!/^\d+$/.test(raw)) throw new ConfigError(`${name} must be a whole number`);
+  const n = Number(raw);
+  if (n < 1 || n > max) throw new ConfigError(`${name} must be between 1 and ${max}`);
+  return n;
 }
 
 type Env = Record<string, string | undefined>;
@@ -157,8 +186,56 @@ export function loadConfig(env: Env = process.env): Config {
     throw new ConfigError('SESSION_IDLE_MINUTES must not exceed SESSION_MAX_HOURS');
   }
 
+  const d = DEFAULT_RATE_LIMIT;
+  const rateLimit: RateLimitConfig = {
+    login: {
+      ipMax: parseCount(env.RATE_LIMIT_LOGIN_IP_MAX, 'RATE_LIMIT_LOGIN_IP_MAX', d.login.ipMax),
+      accountMax: parseCount(
+        env.RATE_LIMIT_LOGIN_ACCOUNT_MAX,
+        'RATE_LIMIT_LOGIN_ACCOUNT_MAX',
+        d.login.accountMax,
+      ),
+      windowSeconds: parseCount(
+        env.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+        'RATE_LIMIT_LOGIN_WINDOW_SECONDS',
+        d.login.windowSeconds,
+        86400,
+      ),
+    },
+    reset: {
+      ipMax: parseCount(env.RATE_LIMIT_RESET_IP_MAX, 'RATE_LIMIT_RESET_IP_MAX', d.reset.ipMax),
+      accountMax: parseCount(
+        env.RATE_LIMIT_RESET_ACCOUNT_MAX,
+        'RATE_LIMIT_RESET_ACCOUNT_MAX',
+        d.reset.accountMax,
+      ),
+      windowSeconds: parseCount(
+        env.RATE_LIMIT_RESET_WINDOW_SECONDS,
+        'RATE_LIMIT_RESET_WINDOW_SECONDS',
+        d.reset.windowSeconds,
+        86400,
+      ),
+    },
+    token: {
+      ipMax: parseCount(env.RATE_LIMIT_TOKEN_IP_MAX, 'RATE_LIMIT_TOKEN_IP_MAX', d.token.ipMax),
+      windowSeconds: parseCount(
+        env.RATE_LIMIT_TOKEN_WINDOW_SECONDS,
+        'RATE_LIMIT_TOKEN_WINDOW_SECONDS',
+        d.token.windowSeconds,
+        86400,
+      ),
+    },
+  };
+
+  const tokenTtl = {
+    inviteSeconds: parseSeconds(env.INVITE_TTL_HOURS, 'INVITE_TTL_HOURS', 3600, 72, 1, 720),
+    resetSeconds: parseSeconds(env.RESET_TTL_MINUTES, 'RESET_TTL_MINUTES', 60, 60, 5, 1440),
+  };
+
   return {
     session,
+    tokenTtl,
+    rateLimit,
     nodeEnv,
     host: env.API_HOST ?? '127.0.0.1',
     port,
