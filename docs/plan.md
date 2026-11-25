@@ -61,7 +61,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: apps/api/src/credential-types.ts (GET/POST /credential-types, /templates, GET/PATCH/DELETE /:id), ADR 0011, new tests; all workspace tests pass; review ship, 0 Critical/High. Follow-ups: T-024 audit (reviewer M1); T-020 should make the 409 TYPE_HAS_CREDENTIALS test build a real credential row (L1); T-025 must re-validate stored schemas and use Object.hasOwn (L2, L4).
 - [x] T-020 [owner: igaro-qa] [deps: T-016, T-017, T-018, T-019] Cross-tenant 404 tests for institutions, keys, holders, types
   - Done: apps/api/src/cross-tenant.test.ts (5 tests, real routes as igaro_app with RLS): institutions, own-institution session scoping, keys (well-formed kids plus positive control), holders incl. photo, types incl. a real credential row for the 409 guard (closes T-019 L1). Follow-ups: swap fixture credential for real issuance after T-025; add rotate/logo scoping checks.
-- [ ] T-021 [owner: igaro-security-reviewer] [deps: T-020] W2 review (key custody, photo handling, tenancy)
+- [x] T-021 [owner: igaro-security-reviewer] [deps: T-020] W2 review (key custody, photo handling, tenancy)
+  - Done: verdict ship, 0 Critical/High; M1 photo snapshot, M2 JPEG allow-list, M3 compromise re-auth must land before T-025/T-031 (ADR 0012); reviewer did not run tests (CI does).
 
 ## W3 Trust core, issuance, lifecycle, audit
 - [ ] T-022 [owner: igaro-crypto-core] [deps: T-014] JCS canonicalize, SHA-256 dataHash, Ed25519 sign/verify with domain prefix, payload schema igaro.credential.v1, golden tests
