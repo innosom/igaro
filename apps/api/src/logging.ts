@@ -1,8 +1,18 @@
 // Log redaction (invariant 9). Request bodies are never logged: the request serializer emits only
-// method, a sanitised path and the remote address. Header values are never logged at all; the
+// method, a sanitised path and a keyed hash of the client IP (never the raw IP, ADR 0003). Header values are never logged at all; the
 // redact paths below are a second line of defence if a handler logs an object by mistake.
 // TODO: switch to the packages/core redact serializer once it exists (core is still a stub).
+import { createHmac } from 'node:crypto';
 import type { LoggerOptions } from 'pino';
+
+/**
+ * Keyed hash of a client IP (HMAC-SHA256, first 128 bits, hex). Used for every log line (ADR 0003);
+ * verification logs (T-032) must use the same function and key so the two can be correlated.
+ */
+export function hashIp(ip: string | undefined, key: Buffer): string | undefined {
+  if (!ip) return undefined;
+  return createHmac('sha256', key).update(ip).digest('hex').slice(0, 32);
+}
 
 const SENSITIVE_KEYS = [
   'authorization',
@@ -51,13 +61,18 @@ export function sanitizeUrl(url: string | undefined): string {
     .replace(/(\/auth\/(?:invites|password-reset)\/)[^/]+/g, '$1:token');
 }
 
-export function loggerOptions(level: string): LoggerOptions {
+export function loggerOptions(level: string, ipHashKey: Buffer): LoggerOptions {
   return {
     level,
     redact: { paths: REDACT_PATHS, censor: '[REDACTED]' },
     serializers: {
       req(req: { method?: string; url?: string; id?: string; ip?: string }) {
-        return { method: req.method, url: sanitizeUrl(req.url), id: req.id, remoteAddress: req.ip };
+        return {
+          method: req.method,
+          url: sanitizeUrl(req.url),
+          id: req.id,
+          ipHash: hashIp(req.ip, ipHashKey),
+        };
       },
       res(res: { statusCode?: number }) {
         return { statusCode: res.statusCode };

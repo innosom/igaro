@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 // Environment parsing for the API. Fails fast (throws ConfigError) on anything invalid.
 // Error messages name the variable but never echo its value (URLs and keys can hold secrets).
 
@@ -16,6 +18,13 @@ export interface Config {
   appDatabaseUrl: string;
   /** 32-byte AES-256-GCM key-encryption key, or undefined when not configured. */
   masterKey: Buffer | undefined;
+  /** HMAC-SHA256 key for hashing client IPs in every log (ADR 0003). */
+  ipHashKey: Buffer;
+  /**
+   * Fastify trustProxy (ADR 0003): false = clients connect directly; a number = trusted proxy hop count;
+   * a string = comma-separated trusted proxy IPs/CIDRs. "Trust everything" (true) is not allowed.
+   */
+  trustProxy: false | number | string;
   cookie: { name: string; secure: boolean; sameSite: 'lax'; domain: string | undefined };
 }
 
@@ -61,6 +70,40 @@ function parseMasterKey(raw: string | undefined): Buffer | undefined {
   return buf;
 }
 
+function parseIpHashKey(raw: string | undefined, nodeEnv: string): Buffer {
+  if (raw === undefined || raw === '') {
+    if (nodeEnv === 'production') throw new ConfigError('IP_HASH_KEY is required in production');
+    // Dev/test: a per-process random key. Hashes still correlate within one run.
+    return randomBytes(32);
+  }
+  if (PLACEHOLDER.test(raw)) throw new ConfigError('IP_HASH_KEY looks like a placeholder');
+  const buf = Buffer.from(raw, 'base64');
+  if (buf.length < 32 || buf.toString('base64') !== raw.trim()) {
+    throw new ConfigError('IP_HASH_KEY must be base64 encoding of at least 32 bytes');
+  }
+  return buf;
+}
+
+const IP_OR_CIDR = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]*:[0-9a-f:.]*)(?:\/\d{1,3})?$/i;
+
+function parseTrustProxy(raw: string | undefined): false | number | string {
+  const v = (raw ?? '').trim();
+  if (v === '' || v === 'false') return false;
+  if (/^\d+$/.test(v)) {
+    const hops = Number(v);
+    if (hops < 1 || hops > 10) throw new ConfigError('TRUST_PROXY hop count must be 1-10');
+    return hops;
+  }
+  if (v === 'true') {
+    throw new ConfigError('TRUST_PROXY=true trusts any client; use a hop count or proxy CIDRs');
+  }
+  const parts = v.split(',').map((x) => x.trim());
+  if (parts.some((x) => !IP_OR_CIDR.test(x))) {
+    throw new ConfigError('TRUST_PROXY must be false, a hop count, or comma-separated IPs/CIDRs');
+  }
+  return parts.join(',');
+}
+
 export function loadConfig(env: Env = process.env): Config {
   const nodeEnv = env.NODE_ENV ?? 'development';
   if (nodeEnv !== 'development' && nodeEnv !== 'test' && nodeEnv !== 'production') {
@@ -96,6 +139,8 @@ export function loadConfig(env: Env = process.env): Config {
     logLevel: env.LOG_LEVEL ?? 'info',
     appDatabaseUrl: parseDbUrl(rawUrl, env),
     masterKey,
+    ipHashKey: parseIpHashKey(env.IP_HASH_KEY, nodeEnv),
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
     cookie: {
       name: env.COOKIE_NAME ?? 'igaro_session',
       secure,

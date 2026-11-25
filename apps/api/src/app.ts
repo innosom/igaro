@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { DestinationStream } from 'pino';
 import type { Config } from './config.js';
@@ -8,7 +9,8 @@ import { loggerOptions } from './logging.js';
 export const API_PREFIX = '/api/v1';
 
 export interface BuildAppOptions {
-  config: Pick<Config, 'logLevel'>;
+  /** ipHashKey and trustProxy come from loadConfig in production; tests may omit them. */
+  config: Pick<Config, 'logLevel'> & Partial<Pick<Config, 'ipHashKey' | 'trustProxy'>>;
   db?: Db;
   /** Log destination; tests capture logs here. */
   logStream?: DestinationStream;
@@ -20,13 +22,21 @@ declare module 'fastify' {
   }
 }
 
+/** Map the TRUST_PROXY setting to Fastify: a hop count trusts the nearest N proxies (ADR 0003). */
+function fastifyTrustProxy(
+  v: false | number | string,
+): boolean | string | ((addr: string, i: number) => boolean) {
+  if (typeof v === 'number') return (_addr: string, i: number) => i < v;
+  return v;
+}
+
 const errBody = (code: string, message: string) => ({ error: { code, message } });
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
-  const base = loggerOptions(opts.config.logLevel);
+  const base = loggerOptions(opts.config.logLevel, opts.config.ipHashKey ?? randomBytes(32));
   const app = Fastify({
     logger: opts.logStream ? { ...base, stream: opts.logStream } : base,
-    trustProxy: false,
+    trustProxy: fastifyTrustProxy(opts.config.trustProxy ?? false),
     bodyLimit: 1024 * 1024,
   });
   app.decorate('db', opts.db);

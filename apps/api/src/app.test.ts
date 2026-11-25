@@ -2,7 +2,7 @@ import { Writable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
-import { sanitizeUrl } from './logging.js';
+import { hashIp, sanitizeUrl } from './logging.js';
 
 function capture(): { stream: Writable; text: () => string } {
   const chunks: string[] = [];
@@ -119,5 +119,33 @@ describe('app scaffold', () => {
     expect(sanitizeUrl('/api/v1/verify/abc123?x=1')).toBe('/api/v1/verify/:token');
     expect(sanitizeUrl('/api/v1/holder/abc')).toBe('/api/v1/holder/:token');
     expect(sanitizeUrl('/API/V1/Verify/AbC')).toBe('/api/v1/verify/:token');
+  });
+  it('logs a keyed hash of the client IP, never the raw IP (ADR 0003)', async () => {
+    const cap = capture();
+    const ipHashKey = Buffer.alloc(32, 3);
+    app = await buildApp({ config: { logLevel: 'info', ipHashKey }, logStream: cap.stream });
+    await app.inject({ method: 'GET', url: '/api/v1/health', remoteAddress: '203.0.113.77' });
+    const out = cap.text();
+    expect(out).not.toContain('203.0.113.77');
+    expect(out).not.toContain('remoteAddress');
+    expect(out).toContain(hashIp('203.0.113.77', ipHashKey));
+  });
+
+  it('uses X-Forwarded-For only when TRUST_PROXY allows it', async () => {
+    const seen: string[] = [];
+    for (const trustProxy of [false, 1] as const) {
+      app = await buildApp({ config: { logLevel: 'silent', trustProxy } });
+      app.get('/ip', async (req) => ({ ip: req.ip }));
+      const res = await app.inject({
+        method: 'GET',
+        url: '/ip',
+        remoteAddress: '10.0.0.2',
+        headers: { 'x-forwarded-for': '198.51.100.9' },
+      });
+      seen.push(res.json().ip);
+      await app.close();
+      app = undefined;
+    }
+    expect(seen).toEqual(['10.0.0.2', '198.51.100.9']);
   });
 });

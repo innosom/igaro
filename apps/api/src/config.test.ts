@@ -57,6 +57,31 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...prod, MASTER_KEY: key, COOKIE_SECURE: 'false' })).toThrow(
       /COOKIE_SECURE/,
     );
-    expect(loadConfig({ ...prod, MASTER_KEY: key }).cookie.secure).toBe(true);
+    expect(loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key }).cookie.secure).toBe(true);
+  });
+
+  it('hashes IPs with IP_HASH_KEY (ADR 0003), required in production', () => {
+    expect(loadConfig(good).ipHashKey).toHaveLength(32);
+    const k = Buffer.alloc(32, 9).toString('base64');
+    expect(loadConfig({ ...good, IP_HASH_KEY: k }).ipHashKey.equals(Buffer.alloc(32, 9))).toBe(
+      true,
+    );
+    expect(() => loadConfig({ ...good, IP_HASH_KEY: 'short' })).toThrow(/IP_HASH_KEY/);
+    expect(() => loadConfig({ ...good, IP_HASH_KEY: 'REPLACE_ME_x' })).toThrow(/placeholder/);
+    expect(() =>
+      loadConfig({ ...good, NODE_ENV: 'production', MASTER_KEY: key, COOKIE_SECURE: 'true' }),
+    ).toThrow(/IP_HASH_KEY is required/);
+  });
+
+  it('parses TRUST_PROXY (ADR 0003) and refuses "true"', () => {
+    expect(loadConfig(good).trustProxy).toBe(false);
+    expect(loadConfig({ ...good, TRUST_PROXY: 'false' }).trustProxy).toBe(false);
+    expect(loadConfig({ ...good, TRUST_PROXY: '1' }).trustProxy).toBe(1);
+    expect(loadConfig({ ...good, TRUST_PROXY: '10.0.0.0/8, 192.168.1.1' }).trustProxy).toBe(
+      '10.0.0.0/8,192.168.1.1',
+    );
+    expect(() => loadConfig({ ...good, TRUST_PROXY: 'true' })).toThrow(/trusts any client/);
+    expect(() => loadConfig({ ...good, TRUST_PROXY: '0' })).toThrow(/hop count/);
+    expect(() => loadConfig({ ...good, TRUST_PROXY: 'evil.example' })).toThrow(/TRUST_PROXY/);
   });
 });
