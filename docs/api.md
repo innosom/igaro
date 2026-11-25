@@ -12,9 +12,10 @@ Conventions: JSON; session via httpOnly Secure cookie; mutating requests require
 | POST /auth/password-reset | anyone | two modes: `{email}` request (always 202), `{token,password}` confirm |
 
 ## Institutions (PA)
-| GET /institutions | list |
-| POST /institutions | create `{name, slug, adminEmail}`; generates key, sends invite |
-| PATCH /institutions/:id/status | `{status: ACTIVE|SUSPENDED, reason}` |
+| GET /institutions | list; `?limit` (1-200, default 50) and `?cursor`; returns `{items:[{id,name,slug,status,createdAt,updatedAt,activeKid}], nextCursor}` (ordered by creation; `nextCursor` null on the last page) |
+| POST /institutions | create `{name, slug, adminEmail}` in one transaction: institution, ACTIVE Ed25519 key (private key wrapped under the master key), first-admin invite; invite mail is enqueued after commit. 201 `{institution, inviteQueued}`. Slug: 3-40 chars `[a-z0-9-]`, no leading/trailing hyphen (400 `INVALID_SLUG`); duplicate slug 409 `SLUG_TAKEN`; admin email already registered 409 `EMAIL_IN_USE`; no master key configured 503 `KEY_CUSTODY_UNAVAILABLE` |
+| PATCH /institutions/:id/status | `{status: ACTIVE|SUSPENDED, reason}`; `reason` required (1-500 chars) for SUSPENDED (400 `REASON_REQUIRED`). Idempotent. Returns the institution. Unknown or malformed id 404 |
+All three: Platform Admin only (401 unauthenticated, 403 Institution Admin); PATCH/POST need the CSRF header like every authenticated mutation.
 
 ## Own institution (IA)
 | GET /institution | |
