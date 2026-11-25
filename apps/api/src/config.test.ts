@@ -15,6 +15,28 @@ describe('loadConfig', () => {
     expect(c.cookie).toMatchObject({ secure: false, sameSite: 'lax' });
   });
 
+  it('defaults account mail to the no-op and selects pg-boss on request (ADR 0006)', () => {
+    expect(loadConfig(good).accountMail).toEqual({ driver: 'noop' });
+    expect(loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss' }).accountMail).toEqual({
+      driver: 'pgboss',
+      databaseUrl: good.APP_DATABASE_URL,
+      schema: undefined,
+    });
+    const w = 'postgresql://igaro_worker:pw@127.0.0.1:5432/igaro';
+    expect(
+      loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: w, PGBOSS_SCHEMA: 'q' })
+        .accountMail,
+    ).toEqual({ driver: 'pgboss', databaseUrl: w, schema: 'q' });
+    for (const bad of [
+      { ACCOUNT_MAIL_QUEUE: 'redis' },
+      { ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA: 'x;drop' },
+      { ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: 'not a url' },
+      { ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: w, DATABASE_URL: w },
+    ]) {
+      expect(() => loadConfig({ ...good, ...bad })).toThrow(ConfigError);
+    }
+  });
+
   it('reads rate limits and token lifetimes from the environment, with safe defaults', () => {
     const d = loadConfig(good);
     expect(d.rateLimit.login).toEqual({ ipMax: 30, accountMax: 5, windowSeconds: 900 });

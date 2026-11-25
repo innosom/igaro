@@ -17,3 +17,4 @@
 | 13 | Photo/EXIF leakage, file abuse | Private storage, signed short-lived links, EXIF stripped, type/size limits; CSV/ZIP path-traversal and zip-bomb limits | none |
 | 14 | Revocation status trust | Status served by iGARO only | On-chain status Phase 1 |
 | 15 | XSS/CSRF | CSP, SameSite cookies, CSRF token on mutating requests, no browser storage of sessions | none |
+| 16 | Raw invite/reset token readable in pg-boss job table (outside RLS) | Jobs deleted ~60 s after completion; expired jobs never sent; token in URL fragment; log redaction; ADR 0005/0006 | Until an `igaro_worker` role and pre-created pg-boss schema exist (platform follow-up), the API role can read pending jobs, so SQL injection could take over pending invites. Do not enable `ACCOUNT_MAIL_QUEUE=pgboss` in production before then. |

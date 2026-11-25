@@ -31,6 +31,10 @@ export interface Config {
   /** Lifetimes of single-use invite and password-reset tokens, in seconds (ADR 0005). */
   tokenTtl: { inviteSeconds: number; resetSeconds: number };
   rateLimit: RateLimitConfig;
+  /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
+  accountMail:
+    | { driver: 'noop' }
+    | { driver: 'pgboss'; databaseUrl: string; schema: string | undefined };
 }
 
 /** Fixed-window limits (ADR 0005). Counts are per process; windows are in seconds. */
@@ -232,7 +236,35 @@ export function loadConfig(env: Env = process.env): Config {
     resetSeconds: parseSeconds(env.RESET_TTL_MINUTES, 'RESET_TTL_MINUTES', 60, 60, 5, 1440),
   };
 
+  const driver = env.ACCOUNT_MAIL_QUEUE ?? 'noop';
+  if (driver !== 'noop' && driver !== 'pgboss') {
+    throw new ConfigError('ACCOUNT_MAIL_QUEUE must be noop or pgboss');
+  }
+  let accountMail: Config['accountMail'] = { driver: 'noop' };
+  if (driver === 'pgboss') {
+    const useWorkerUrl = Boolean(env.WORKER_DATABASE_URL);
+    const queueUrl = env.WORKER_DATABASE_URL || rawUrl;
+    if (useWorkerUrl) {
+      // Same checks as the app URL, naming the right variable.
+      try {
+        new URL(queueUrl);
+      } catch {
+        throw new ConfigError('WORKER_DATABASE_URL is not a valid URL');
+      }
+      if (PLACEHOLDER.test(queueUrl)) throw new ConfigError('WORKER_DATABASE_URL looks like a placeholder');
+      if (env.DATABASE_URL && env.DATABASE_URL === queueUrl) {
+        throw new ConfigError('WORKER_DATABASE_URL must differ from the owner DATABASE_URL');
+      }
+    }
+    const schema = env.PGBOSS_SCHEMA || undefined;
+    if (schema !== undefined && !/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) {
+      throw new ConfigError('PGBOSS_SCHEMA must be a simple lower-case identifier');
+    }
+    accountMail = { driver: 'pgboss', databaseUrl: queueUrl, schema };
+  }
+
   return {
+    accountMail,
     session,
     tokenTtl,
     rateLimit,
