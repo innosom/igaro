@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { S3Config } from './storage.js';
 
 // Environment parsing for the API. Fails fast (throws ConfigError) on anything invalid.
 // Error messages name the variable but never echo its value (URLs and keys can hold secrets).
@@ -31,6 +32,10 @@ export interface Config {
   /** Lifetimes of single-use invite and password-reset tokens, in seconds (ADR 0005). */
   tokenTtl: { inviteSeconds: number; resetSeconds: number };
   rateLimit: RateLimitConfig;
+  /** Private object storage (ADR 0008), or undefined when not configured (uploads answer 503). */
+  s3: S3Config | undefined;
+  /** Largest accepted logo upload in bytes (LOGO_MAX_BYTES, default 1 MB). */
+  logoMaxBytes: number;
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
@@ -154,6 +159,47 @@ function parseTrustProxy(raw: string | undefined): false | number | string {
   return parts.join(',');
 }
 
+function parseS3(env: Env, nodeEnv: string): S3Config | undefined {
+  const bucket = env.S3_BUCKET;
+  const accessKey = env.S3_ACCESS_KEY;
+  const secretKey = env.S3_SECRET_KEY;
+  if (!bucket && !accessKey && !secretKey) return undefined;
+  if (!bucket || !accessKey || !secretKey) {
+    throw new ConfigError('S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY must be set together');
+  }
+  if (PLACEHOLDER.test(secretKey) || PLACEHOLDER.test(accessKey)) {
+    throw new ConfigError('S3 credentials look like placeholders');
+  }
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) {
+    throw new ConfigError('S3_BUCKET is not a valid bucket name');
+  }
+  const region = env.S3_REGION || 'us-east-1';
+  const endpoint = env.S3_ENDPOINT || `https://s3.${region}.amazonaws.com`;
+  let u: URL;
+  try {
+    u = new URL(endpoint);
+  } catch {
+    throw new ConfigError('S3_ENDPOINT is not a valid URL');
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new ConfigError('S3_ENDPOINT must be http(s)');
+  if (u.username || u.password) throw new ConfigError('S3_ENDPOINT must not contain credentials');
+  if (nodeEnv === 'production' && u.protocol !== 'https:') {
+    throw new ConfigError('S3_ENDPOINT must use https in production');
+  }
+  const fps = env.S3_FORCE_PATH_STYLE;
+  if (fps !== undefined && fps !== '' && fps !== 'true' && fps !== 'false') {
+    throw new ConfigError('S3_FORCE_PATH_STYLE must be true or false');
+  }
+  return {
+    endpoint,
+    region,
+    bucket,
+    accessKey,
+    secretKey,
+    forcePathStyle: fps === undefined || fps === '' ? Boolean(env.S3_ENDPOINT) : fps === 'true',
+  };
+}
+
 export function loadConfig(env: Env = process.env): Config {
   const nodeEnv = env.NODE_ENV ?? 'development';
   if (nodeEnv !== 'development' && nodeEnv !== 'test' && nodeEnv !== 'production') {
@@ -263,7 +309,11 @@ export function loadConfig(env: Env = process.env): Config {
     accountMail = { driver: 'pgboss', databaseUrl: queueUrl, schema };
   }
 
+  const logoMaxBytes = parseCount(env.LOGO_MAX_BYTES, 'LOGO_MAX_BYTES', 1024 * 1024, 10 * 1024 * 1024);
+
   return {
+    s3: parseS3(env, nodeEnv),
+    logoMaxBytes,
     accountMail,
     session,
     tokenTtl,

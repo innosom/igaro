@@ -141,4 +141,29 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...good, TRUST_PROXY: '0' })).toThrow(/hop count/);
     expect(() => loadConfig({ ...good, TRUST_PROXY: 'evil.example' })).toThrow(/TRUST_PROXY/);
   });
+
+  it('parses object storage and the logo cap (ADR 0008)', () => {
+    const c = loadConfig(good);
+    expect(c.s3).toBeUndefined();
+    expect(c.logoMaxBytes).toBe(1024 * 1024);
+    const s3 = {
+      S3_ENDPOINT: 'http://127.0.0.1:9000',
+      S3_BUCKET: 'igaro',
+      S3_ACCESS_KEY: 'ak',
+      S3_SECRET_KEY: 'sk-value',
+    };
+    expect(loadConfig({ ...good, ...s3, LOGO_MAX_BYTES: '2048' })).toMatchObject({
+      s3: { bucket: 'igaro', region: 'us-east-1', forcePathStyle: true },
+      logoMaxBytes: 2048,
+    });
+    expect(() => loadConfig({ ...good, S3_BUCKET: 'igaro' })).toThrow(/set together/);
+    expect(() => loadConfig({ ...good, ...s3, LOGO_MAX_BYTES: 'big' })).toThrow(/LOGO_MAX_BYTES/);
+    expect(() => loadConfig({ ...good, ...s3, S3_ENDPOINT: 'ftp://x' })).toThrow(/http/);
+    expect(() => loadConfig({ ...good, ...s3, S3_SECRET_KEY: 'change-me' })).toThrow(/placeholder/);
+    try {
+      loadConfig({ ...good, ...s3, S3_SECRET_KEY: 'change-me' });
+    } catch (e) {
+      expect(String((e as Error).message)).not.toContain('change-me');
+    }
+  });
 });

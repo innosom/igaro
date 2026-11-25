@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { Db } from './db.js';
+import { S3ObjectStorage } from './storage.js';
 import { NoopAccountMailQueue, type AccountMailQueue } from './notifications.js';
 
 const config = loadConfig();
@@ -20,7 +21,8 @@ if (config.accountMail.driver === 'pgboss') {
   stopQueue = q.stop;
 }
 
-const app = await buildApp({ config, db, accountMail });
+const storage = config.s3 ? new S3ObjectStorage(config.s3) : undefined;
+const app = await buildApp({ config, db, accountMail, storage });
 app.addHook('onClose', async () => {
   await stopQueue?.();
   await db.close();
