@@ -14,6 +14,7 @@ import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institutio
 import { registerCredentialTypes } from './credential-types.js';
 import { CredentialService, registerCredentials } from './credentials.js';
 import { CredentialLifecycleService, registerCredentialLifecycle } from './credential-lifecycle.js';
+import { CredentialQueryService, registerCredentialQueries } from './credential-queries.js';
 import { DEFAULT_PHOTO_MAX_BYTES, registerHolders } from './holders.js';
 import type { ObjectStorage } from './storage.js';
 import { hashIp, loggerOptions } from './logging.js';
@@ -137,6 +138,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         const credentialOpts = { masterKey: opts.config.masterKey, hashIp: (ip: string | undefined) => hashIp(ip, ipHashKey) };
         registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log);
         registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log);
+        registerCredentialQueries(api, new CredentialQueryService(opts.db));
         registerHolders(api, {
           db: opts.db,
           storage: opts.storage,

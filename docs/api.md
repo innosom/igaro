@@ -53,9 +53,9 @@ Institution Admin only; other tenants' ids are 404. Response shape: `{id, code, 
 Editing attributes never changes issued credentials: each signed payload carries its own attributes. See ADR 0011.
 
 ## Credentials (IA)
-| GET /credentials | filter `status, type, q`; status is computed (EXPIRED) |
+| GET /credentials | `?status` (DRAFT, ACTIVE, SUSPENDED, REVOKED, SUPERSEDED, EXPIRED; EXPIRED is computed from ACTIVE past `expiresAt`, and ACTIVE excludes expired), `?type` (type code), `?q` (case-insensitive substring of credential number or holder name, max 100, wildcards literal), `?limit` (1-200, default 50), `?cursor`. Returns `{items:[{id, credentialNumber, status, holder:{id,fullName}, type:{code,name}, issuedAt, expiresAt, supersededBy, createdAt}], nextCursor}` newest first. Bad parameter 400 (`INVALID_STATUS`, `INVALID_TYPE`, `INVALID_SEARCH`, `INVALID_LIMIT`, `INVALID_CURSOR`, `UNKNOWN_PROPERTY`). ADR 0018 |
 | POST /credentials | `{holderId, credentialTypeCode, attributes, expiresAt?}` -> 201 signed ACTIVE credential (`id, credentialNumber, payload, dataHash, signature, issuerKeyId, verificationToken, holderToken`; `holderToken` is returned only here). 404 unknown/foreign holder or type; 409 `HOLDER_PHOTO_REQUIRED`, `NO_ACTIVE_KEY`, `INSTITUTION_SUSPENDED`; 503 `KEY_CUSTODY_UNAVAILABLE`. See ADR 0016 |
-| GET /credentials/:id | includes events |
+| GET /credentials/:id | list fields plus `storedStatus, attributes, dataHash, signature, issuerKeyId, anchorStatus, events[{id,type,payload,createdAt}]`. Never returns the verification token, holder token or hash, or the salt (so not the whole payload). Foreign, unknown or malformed id: 404 |
 | POST /credentials/:id/suspend | `{reason}` required (400 `REASON_REQUIRED`). 200 `{id, credentialNumber, status, previousStatus}`; 404 unknown/foreign; 409 `INVALID_TRANSITION`. ADR 0017 |
 | POST /credentials/:id/reinstate | optional `{reason}`; SUSPENDED -> ACTIVE; 409 otherwise |
 | POST /credentials/:id/revoke | `{reason}` required; terminal; ACTIVE only |
@@ -65,7 +65,13 @@ Editing attributes never changes issued credentials: each signed payload carries
 Illegal transitions return 409. Idempotency-Key header supported on issue.
 
 ## Dashboard and audit (IA)
-GET /dashboard/stats (counts by status); GET /audit-logs; GET /audit-logs/verify-chain (compares chain with signed daily heads).
+| Route | Behaviour |
+|---|---|
+| GET /dashboard/stats | `{total, byStatus:{DRAFT,ACTIVE,SUSPENDED,REVOKED,SUPERSEDED,EXPIRED}}`, EXPIRED computed, all keys always present |
+| GET /audit-logs | own chain, newest first; `?limit` (1-200, default 50), `?cursor`; `{items:[{id,seq,actorId,action,targetType,targetId,metadata,createdAt,prevHash,entryHash}], nextCursor}`; hashed IP not returned |
+| GET /audit-logs/verify-chain | `{valid, entries, head?, brokenAtSeq?, reason?, headsRecorded, signedHeads:{checked,matched,mismatchedDays}}`. Recomputes the chain and checks each signed daily head is still in it; no head rows: `headsRecorded:false`. Head signatures and OTS proofs are not checked here (ADR 0018) |
+
+All IA only, `Cache-Control: no-store`.
 
 ## Public (rate limited per IP and per token)
 | GET /verify/:verificationToken | `{result: VERIFIED|VALID_WITH_WARNING|SUSPENDED|REVOKED|SUPERSEDED|EXPIRED|NOT_FOUND|VERIFICATION_FAILED, institution, holder (per publicFields), type, status, issuedAt, expiresAt, supersededBy?, proof:{signedBy, kid, anchorStatus}}` |
