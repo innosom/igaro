@@ -32,7 +32,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - From T-004 review: signed columns (payload, data_hash, signature, issuer_kid) immutable once out of DRAFT
 - [x] T-007 [owner: igaro-platform] [deps: T-005] Seed data (platform admin, demo institution, two credential type templates)
   - Done: `pnpm db:seed` creates platform admin, demo institution `eau` + admin, STUDENT_ID/CERTIFICATE types, 3 demo holders; Argon2id, idempotent, RLS-scoped, no keys. Production seeds only the platform admin unless SEED_DEMO=1; test password only in dev/test. Follow-ups: no root db:migrate runner yet; CI must allow @node-rs/argon2 native build; seed writes no audit entries (T-024).
-- [ ] T-008 [owner: igaro-api] [deps: T-005] Fastify scaffold under /api/v1, config, log redaction, tenant-scoped data-access layer (institution_id from session)
+- [x] T-008 [owner: igaro-api] [deps: T-005] Fastify scaffold under /api/v1, config, log redaction, tenant-scoped data-access layer (institution_id from session)
+  - Done: Fastify /api/v1 with config, health, error shape, pino redaction, withTenant DAL + HolderRepository (platform sessions read-only). 28 api tests pass incl. RLS cross-tenant 404; review ship after 2 Mediums fixed. Follow-ups: configurable trustProxy, startup role check (no superuser/BYPASSRLS), private Db.pool, hashed-IP log policy, core redactor.
 - [ ] T-009 [owner: igaro-api] [deps: T-008, T-007] Auth: login, logout, me with Argon2id and hashed httpOnly cookie sessions
 - [ ] T-010 [owner: igaro-api] [deps: T-009] Invite accept, password reset, login rate limiting
 - [ ] T-011 [owner: igaro-worker] [deps: T-005, T-002] Worker scaffold (pg-boss) and invite/reset email jobs to Mailpit
@@ -62,7 +63,7 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 
 ## W4 Verification, keys.json, CLI
 - [ ] T-031 [owner: igaro-crypto-core] [deps: T-022, T-023] Verification algorithm in packages/core following invariant 7 order
-- [ ] T-032 [owner: igaro-api] [deps: T-031, T-026] Public GET /verify/:token and credential.json, hashed-IP verification log, per-IP and per-token rate limits, ops alert on failure
+- [ ] T-032 [owner: igaro-api] [deps: T-031, T-026] Public GET /verify/:token and credential.json, hashed-IP verification log (hashIp + IP_HASH_KEY, ADR 0003), per-IP and per-token rate limits, ops alert on failure
 - [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken (lookup by SHA-256 of the token, ADR 0002)
 - [ ] T-034 [owner: igaro-crypto-core] [deps: T-031] tools/verify-cli independent verifier (no iGARO API calls) with tests
 - [ ] T-035 [owner: igaro-web] [deps: T-010] apps/web scaffold, Tailwind, login, invite accept and password reset pages
@@ -79,6 +80,6 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 - [ ] T-044 [owner: igaro-worker] [deps: T-043, T-041] CSV + ZIP import batch job (500 holders with photos, issue, email each)
 - [ ] T-045 [owner: igaro-web] [deps: T-027, T-035, T-016, T-017] Dashboard: branding, keys, holders, types, issue form, lifecycle actions, credential list, status counts, audit view
 - [ ] T-046 [owner: igaro-web] [deps: T-043, T-015, T-045] CSV import preview UI and platform-admin screens
-- [ ] T-047 [owner: igaro-platform] [deps: T-044, T-003] Staging deployment config, production hardening notes, CI proposals update
+- [ ] T-047 [owner: igaro-platform] [deps: T-044, T-003] Staging deployment config (set TRUST_PROXY and IP_HASH_KEY, ADR 0003), production hardening notes, CI proposals update
 - [ ] T-048 [owner: igaro-qa] [deps: T-044, T-046, T-042, T-036] Playwright E2E demo script, 500-holder import test, no-secrets-in-logs test
 - [ ] T-049 [owner: igaro-security-reviewer] [deps: T-047, T-048] Final review against all invariants and section 15 success criteria

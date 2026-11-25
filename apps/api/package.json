@@ -9,6 +9,15 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
+    "start": "node dist/server.js",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "fastify": "^5",
+    "pg": "^8.23.1",
+    "pino": "^9"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }
