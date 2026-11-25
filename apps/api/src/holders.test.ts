@@ -400,7 +400,8 @@ describe.skipIf(!url)('holders (needs Postgres)', () => {
       expect(body.hasPhoto).toBe(true);
 
       const r = await holderRow(h.id);
-      expect(r.photo_key).toMatch(new RegExp(`^institutions/${INST_A}/holders/${h.id}/photo/[0-9a-f-]{36}\\.png$`));
+      expect(r.photo_key).toMatch(new RegExp(`^institutions/${INST_A}/holders/${h.id}/photo/[0-9a-f]{64}\\.png$`));
+      expect(r.photo_key).toContain(`/${r.photo_sha256}.`);
       const stored = storage.objects.get(r.photo_key)!;
       expect(stored.contentType).toBe('image/png');
       expect(stored.body.includes('GPS-SECRET')).toBe(false);
