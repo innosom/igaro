@@ -136,8 +136,15 @@ jobs:
             5. Write your decision to the file `.igaro-review-verdict` (do not commit it), first line exactly
                `APPROVE` or `REJECT`, then the reasons. APPROVE only if: tests pass (or there is no code yet),
                no Critical/High findings remain, no CLAUDE.md invariant is broken, and the PR body has no
-               open "BLOCKED:" question that needs the owner. Product decisions the white paper does not
-               settle → REJECT so the owner decides. When in doubt, REJECT.
+               open "BLOCKED:" question that needs the owner. The owner has given standing permission to take
+               the recommended option on product decisions the white paper does not settle. If the PR (or an
+               ADR on this branch) already settles one that way, accept it when it is consistent with the white
+               paper and CLAUDE.md and is the safest option. If it leaves one open, or picked a weaker option,
+               settle it yourself on this branch: implement the safest option with tests and an ADR (see
+               docs/adr/0002 and 0003), as part of step 4. REJECT only for a "BLOCKED:" question, or for a
+               decision that spends money, accepts terms, sends or publishes outside the repo, deletes data,
+               adds a paid or external service, or changes the MVP scope. Otherwise, when in doubt about
+               code or security, REJECT.
             6. Post your review: `gh pr comment ${{ steps.pr.outputs.num }} --body "<verdict, findings,
                fixes you made, test results>"`.
 

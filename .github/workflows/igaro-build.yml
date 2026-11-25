@@ -127,14 +127,22 @@ jobs:
                clear message, push it, and open a PR with:
                `gh pr create --base main --label igaro-build --title "<task-id>: <title>" --body "<summary>"`
                The body must contain: what was built, how it was tested (with results), the security
-               reviewer's verdict and any remaining Medium/Low findings, and open questions for the owner.
+               reviewer's verdict and any remaining Medium/Low findings, and a section
+               "## Owner decisions (recommended options taken)" listing each decision you made (see Rules).
 
             Rules:
             - Never push to main. Never modify anything under .github/ (the token cannot); if CI needs a
               change, describe it in docs/ci-proposals.md instead.
             - Never commit secrets. Use only test values. Never weaken a CLAUDE.md invariant to make a test pass.
-            - If you are blocked (missing decision, conflicting spec), still open the PR with what you have and
-              put the question at the top of its body, prefixed "BLOCKED:".
+            - Decisions the white paper does not settle: the owner has given standing permission to take the
+              recommended option. Choose the one consistent with the white paper and CLAUDE.md that is the
+              safest (privacy-preserving, least privilege, configurable rather than hard-coded, never weaker on
+              security). Past examples: docs/adr/0002 and 0003. Implement it with tests, record it in
+              docs/adr/NNNN-<slug>.md ("recommended option taken under the owner's standing permission") and
+              list it in the PR body. Do not leave such questions open.
+            - Only if a decision spends money, accepts terms, sends or publishes something outside the repo,
+              deletes data, adds a paid or external service, or changes the MVP scope: still open the PR with
+              what you have and put the question at the top of its body, prefixed "BLOCKED:".
 
       # A run that ends without a PR counts as a failure, so the reviewer will not restart it in a loop.
       - name: Check that a build PR was opened
