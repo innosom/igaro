@@ -32,9 +32,9 @@ const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const NUMBER_RE = /^-?(?:0|[1-9]\d{0,14})(?:\.\d{1,10})?$/;
 // C0/C1 controls, bidi and other format characters, lone surrogates (JSONB and I-JSON cannot hold them).
 // eslint-disable-next-line no-control-regex
-const BAD_TEXT_RE = /[\u0000-\u001f\u007f-\u009f]|\p{Cf}|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u;
+export const BAD_TEXT_RE = /[\u0000-\u001f\u007f-\u009f]|\p{Cf}|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u;
 
-const badRequest = (code: string, message: string) => new AppError(400, code, message);
+export const badRequest = (code: string, message: string) => new AppError(400, code, message);
 
 export interface IssueInput {
   holderId: string;
@@ -73,7 +73,7 @@ export function parseIssueBody(body: unknown): IssueInput {
   return out;
 }
 
-function isIsoSeconds(v: unknown): v is string {
+export function isIsoSeconds(v: unknown): v is string {
   if (typeof v !== 'string' || !ISO_RE.test(v)) return false;
   const t = Date.parse(v);
   return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 19) + 'Z' === v;
@@ -177,7 +177,13 @@ async function nextCredentialNumber(c: PoolClient, institutionId: string, year: 
  * The single issuance code path. Runs inside the caller's tenant transaction (Db.withTenant) so everything commits or
  * rolls back together. The batch/CSV import (T-043/T-044) calls this same function per row via the API.
  */
-export async function issueInTransaction(c: PoolClient, ctx: IssueContext, input: IssueInput): Promise<IssuedCredential> {
+export async function issueInTransaction(
+  c: PoolClient,
+  ctx: IssueContext,
+  input: IssueInput,
+  /** Set only by the reissue path (T-026): the credential this one replaces; recorded in the ISSUED event and audit. */
+  opts: { reissuedFrom?: string } = {},
+): Promise<IssuedCredential> {
   if (!isUuid(input.holderId)) throw new NotFoundError();
   const now = ctx.now ?? new Date();
   const issuedAt = toIsoSeconds(now);
@@ -274,7 +280,7 @@ export async function issueInTransaction(c: PoolClient, ctx: IssueContext, input
   await c.query(
     `INSERT INTO credential_events (id, institution_id, credential_id, type, payload)
      VALUES ($1, app_institution_id(), $2, 'ISSUED', $3::jsonb)`,
-    [randomUUID(), id, JSON.stringify({ credentialNumber, dataHash, kid: key.kid })],
+    [randomUUID(), id, JSON.stringify({ credentialNumber, dataHash, kid: key.kid, ...(opts.reissuedFrom ? { reissuedFrom: opts.reissuedFrom } : {}) })],
   );
   await appendAudit(c, {
     institutionId: ctx.institutionId,
@@ -282,7 +288,10 @@ export async function issueInTransaction(c: PoolClient, ctx: IssueContext, input
     action: 'credential.issued',
     targetType: 'credential',
     targetId: id,
-    metadata: { credentialNumber, credentialType: type.code, holderId: holder.id, kid: key.kid, dataHash },
+    metadata: {
+      credentialNumber, credentialType: type.code, holderId: holder.id, kid: key.kid, dataHash,
+      ...(opts.reissuedFrom ? { reissuedFrom: opts.reissuedFrom } : {}),
+    },
     ip: ctx.ipHash ?? null,
   });
 

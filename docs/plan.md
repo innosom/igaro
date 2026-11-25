@@ -74,7 +74,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 - [x] T-025 [owner: igaro-api] [deps: T-022, T-024, T-018, T-019, T-017] Single issuance in one transaction (payload, salt, sign, ACTIVE, event, audit, tokens, credential number)
   - Done: POST /api/v1/credentials (apps/api/src/credentials.ts, ADR 0016); 34 new tests. Reviewer: ship, 0 Critical/High. Follow-ups: M1 concurrent photo upload can delete in-use content-addressed object (fix before T-032/T-039); L1 bidi/format chars in holder name/external_id; L2 FOR SHARE on institution status; L3 orphaned photo objects.
   - BLOCKER (T-018 review M1): photo replacement on a holder with credentials destroys the file their signed photoSha256 commits to. Before T-025 merges: refuse (409) or keep photos immutable and hash-addressed; also JPEG allow-list (L1). Verify/card must show only a photo whose SHA-256 equals the payload's photoSha256.
-- [ ] T-026 [owner: igaro-api] [deps: T-025] Suspend, reinstate, revoke (reasons required), reissue (SUPERSEDED link) via credential_events
+- [x] T-026 [owner: igaro-api] [deps: T-025] Suspend, reinstate, revoke (reasons required), reissue (SUPERSEDED link) via credential_events
+  - Done: POST /credentials/:id/{suspend,reinstate,revoke,reissue} (credential-lifecycle.ts, ADR 0017); 14 new tests, 283 api tests pass; review ship, 0 Critical/High. Follow-ups: M1 SUSPENDED to REVOKED owner decision (ADR 0014 M4); L1 no forward link on revoked-then-reissued; L2 partial unique index for reissuedFrom; L3 clearer error for expired reissue.
 - [ ] T-027 [owner: igaro-api] [deps: T-025] Credentials list/get with search and filter, dashboard stats, audit-logs, verify-chain endpoints
 - [ ] T-028 [owner: igaro-worker] [deps: T-024, T-011] Daily audit head hash job: sign and timestamp with OpenTimestamps, store proof
 - [ ] T-029 [owner: igaro-qa] [deps: T-026, T-027, T-028] Tamper, lifecycle, REVOKED-final, audit-chain-vs-signed-head and cross-tenant tests for credentials
