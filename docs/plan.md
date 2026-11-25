@@ -65,7 +65,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: verdict ship, 0 Critical/High; M1 photo snapshot, M2 JPEG allow-list, M3 compromise re-auth must land before T-025/T-031 (ADR 0012); reviewer did not run tests (CI does).
 
 ## W3 Trust core, issuance, lifecycle, audit
-- [ ] T-022 [owner: igaro-crypto-core] [deps: T-014] JCS canonicalize, SHA-256 dataHash, Ed25519 sign/verify with domain prefix, payload schema igaro.credential.v1, golden tests
+- [x] T-022 [owner: igaro-crypto-core] [deps: T-014] JCS canonicalize, SHA-256 dataHash, Ed25519 sign/verify with domain prefix, payload schema igaro.credential.v1, golden tests
+  Done: JCS, dataHash, Ed25519 sign/verify, payload validation and golden tests in packages/core (ADR 0013).
 - [ ] T-023 [owner: igaro-crypto-core] [deps: T-022] Lifecycle state machine, audit hash-chain helpers, AnchorService and NoopAnchorService
 - [ ] T-024 [owner: igaro-api] [deps: T-023, T-006, T-008] Audit log service: per-institution DB lock, hash chain, append-only writes; also audit institution create/suspend/reinstate from T-015
 - [ ] T-025 [owner: igaro-api] [deps: T-022, T-024, T-018, T-019, T-017] Single issuance in one transaction (payload, salt, sign, ACTIVE, event, audit, tokens, credential number)
