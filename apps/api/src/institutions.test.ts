@@ -447,6 +447,18 @@ describe.skipIf(!url)('institutions: platform admin management (needs Postgres)'
       expect(
         (await ownerQuery(`SELECT status FROM institutions WHERE id = $1`, [id])).rows[0].status,
       ).toBe('ACTIVE');
+
+      // Create + suspend + reinstate are in the audit log; the no-op repeat is not.
+      const audit = await ownerQuery(
+        `SELECT action, metadata FROM audit_logs WHERE institution_id = $1 ORDER BY seq`,
+        [id],
+      );
+      expect(audit.rows.map((r) => r.action)).toEqual([
+        'institution.created',
+        'institution.suspended',
+        'institution.reinstated',
+      ]);
+      expect(audit.rows[1].metadata).toMatchObject({ reason: 'Unpaid invoice', to: 'SUSPENDED' });
     });
 
     it('404 for an unknown or malformed id', async () => {

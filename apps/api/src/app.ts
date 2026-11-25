@@ -120,6 +120,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           new InstitutionService(opts.db, account, {
             masterKey: opts.config.masterKey,
             log: app.log,
+            hashIp: (ip) => hashIp(ip, ipHashKey),
           }),
           app.log,
         );

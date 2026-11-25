@@ -69,7 +69,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   Done: JCS, dataHash, Ed25519 sign/verify, payload validation and golden tests in packages/core (ADR 0013).
 - [x] T-023 [owner: igaro-crypto-core] [deps: T-022] Lifecycle state machine, audit hash-chain helpers, AnchorService and NoopAnchorService
   - Done: packages/core lifecycle.ts, audit-chain.ts (golden-pinned entry hash, verifyChain), anchor.ts; ADR 0014; 36 core tests pass; review ship, 0 Critical/High; M1 and M2 fixed; M3 createdAt round-trip is a T-024 requirement; M4 suspended->revoke left as owner question.
-- [ ] T-024 [owner: igaro-api] [deps: T-023, T-006, T-008] Audit log service: per-institution DB lock, hash chain, append-only writes; also audit institution create/suspend/reinstate from T-015
+- [x] T-024 [owner: igaro-api] [deps: T-023, T-006, T-008] Audit log service: per-institution DB lock, hash chain, append-only writes; also audit institution create/suspend/reinstate from T-015
+  - Done: apps/api/src/audit.ts (appendAudit, verifyAuditChain), institution create/suspend/reinstate audited in-transaction (ADR 0015); 235 api tests pass; review ship, 0 Critical/High/Medium; Low 1 and 2 fixed.
 - [ ] T-025 [owner: igaro-api] [deps: T-022, T-024, T-018, T-019, T-017] Single issuance in one transaction (payload, salt, sign, ACTIVE, event, audit, tokens, credential number)
   - BLOCKER (T-018 review M1): photo replacement on a holder with credentials destroys the file their signed photoSha256 commits to. Before T-025 merges: refuse (409) or keep photos immutable and hash-addressed; also JPEG allow-list (L1). Verify/card must show only a photo whose SHA-256 equals the payload's photoSha256.
 - [ ] T-026 [owner: igaro-api] [deps: T-025] Suspend, reinstate, revoke (reasons required), reissue (SUPERSEDED link) via credential_events
