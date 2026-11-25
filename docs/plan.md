@@ -53,7 +53,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
 - [x] T-016 [owner: igaro-api] [deps: T-015] Own institution GET/PATCH (branding, public-field settings) and logo upload to private storage
   - Done: apps/api/src/institution-profile.ts, storage.ts (SigV4 S3 + memory), image.ts (magic-byte sniff, metadata strip); ADR 0008; no migration needed. Follow-ups: T-024 audit (TODO(T-024)); verify endpoint must honour publicFields allow-list (photo, idNumber, attributes); orphan logo cleanup.
   - Reviewer Mediums (must fix before T-018 merges): image.ts JPEG cleaner copies data after first SOS (strip between scans, cut at EOI); PNG cleaner is a deny-list with no CRC/dimension cap (use allow-list, verify CRC, cap dimensions).
-- [ ] T-017 [owner: igaro-api] [deps: T-015] Signing key rotation (old key RETIRED) and mark-compromised
+- [x] T-017 [owner: igaro-api] [deps: T-015] Signing key rotation (old key RETIRED) and mark-compromised
+  - Done: apps/api/src/signing-keys.ts (GET /institution/keys, POST rotate, POST :kid/compromise), migration 20261125010000 (tenant policies on own keys + status/retired_at guard trigger), ADR 0009; all workspace tests pass; review ship, 0 Critical/High. Follow-ups: T-024 must audit rotate/compromise with the reason (TODO(T-024), reviewer M1) and drop the reason from logs; confirm whether admins of a SUSPENDED institution may change keys; init-migration comment on keys is stale.
 - [ ] T-018 [owner: igaro-api] [deps: T-015] Holders CRUD, photo upload with EXIF strip and SHA-256 photoSha256
 - [ ] T-019 [owner: igaro-api] [deps: T-015] Credential types CRUD with attribute lists; STUDENT_ID and CERTIFICATE templates
 - [ ] T-020 [owner: igaro-qa] [deps: T-016, T-017, T-018, T-019] Cross-tenant 404 tests for institutions, keys, holders, types

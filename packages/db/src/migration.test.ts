@@ -468,20 +468,42 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
       });
     });
 
-    it('tenant scope cannot update or insert institution_keys', async () => {
+    it('tenant scope manages only its own keys, and only status/retired_at (T-017, ADR 0009)', async () => {
       await asTenant(A, async () => {
-        const r = await c.query(`UPDATE institution_keys SET status = 'RETIRED' WHERE id = $1`, [ids.keyA]);
-        expect(r.rowCount).toBe(0);
         expect((await c.query('SELECT 1 FROM institution_keys')).rowCount).toBe(1);
+        // another tenant's key is invisible: nothing updated
         expect(
-          await code(() =>
+          (await c.query(`UPDATE institution_keys SET status = 'RETIRED' WHERE id = $1`, [ids.keyB])).rowCount,
+        ).toBe(0);
+        // key material and ownership are immutable for the app role
+        expect(
+          await code(() => c.query(`UPDATE institution_keys SET public_key = 'x' WHERE id = $1`, [ids.keyA])),
+        ).toBe('42501');
+        expect(
+          await code(() => c.query(`UPDATE institution_keys SET institution_id = $2 WHERE id = $1`, [ids.keyA, B])),
+        ).toBe('42501');
+        const ins = (inst: string, status: string) =>
+          code(() =>
             c.query(
               `INSERT INTO institution_keys (id, institution_id, kid, public_key, encrypted_private_key, status)
-               VALUES ($1,$2,'kid-evil','p','e','RETIRED')`,
-              [uid(), A],
+               VALUES ($1,$2,$3,'p','e',$4)`,
+              [uid(), inst, `kid-${uid()}`, status],
             ),
-          ),
-        ).toBe('42501');
+          );
+        expect(await ins(B, 'ACTIVE')).toBe('42501'); // other tenant
+        expect(await ins(A, 'RETIRED')).toBe('42501'); // new keys start ACTIVE
+        expect(await ins(A, 'ACTIVE')).toBe('23505'); // one ACTIVE key per institution already exists
+        // own key may move forward, but never back to ACTIVE
+        expect(
+          (
+            await c.query(`UPDATE institution_keys SET status = 'RETIRED', retired_at = now() WHERE id = $1`, [
+              ids.keyA,
+            ])
+          ).rowCount,
+        ).toBe(1);
+        expect(
+          await code(() => c.query(`UPDATE institution_keys SET status = 'ACTIVE' WHERE id = $1`, [ids.keyA])),
+        ).toBe('23514');
       });
     });
 
