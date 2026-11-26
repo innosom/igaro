@@ -78,6 +78,15 @@ describe('credential signing', () => {
     expect(verifyCredentialIntegrity(payload, s.dataHash, bad.toString('base64url'), RAW_PUB)).toBe('SIGNATURE_INVALID');
     expect(verifyCredentialIntegrity(payload, s.dataHash, 'not a signature', RAW_PUB)).toBe('SIGNATURE_INVALID');
   });
+  it('rejects non-canonical base64url signature encodings (same 64 bytes, different string)', () => {
+    expect(GOLDEN_SIGNATURE.endsWith('A')).toBe(true);
+    expect(verifyDataHashSignature(GOLDEN_HASH, GOLDEN_SIGNATURE, RAW_PUB)).toBe(true);
+    for (const last of ['B', 'C', 'D', 'P']) {
+      const alt = GOLDEN_SIGNATURE.slice(0, -1) + last;
+      expect(Buffer.from(alt, 'base64url').equals(Buffer.from(GOLDEN_SIGNATURE, 'base64url'))).toBe(true);
+      expect(verifyDataHashSignature(GOLDEN_HASH, alt, RAW_PUB)).toBe(false);
+    }
+  });
   it('rejects a signature made without the domain prefix', async () => {
     const { sign } = await import('node:crypto');
     const raw = sign(null, Buffer.from(GOLDEN_HASH, 'utf8'), privateKey).toString('base64url');

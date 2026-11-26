@@ -107,7 +107,11 @@ export function verifyDataHashSignature(dataHash: string, signature: string, pub
   try {
     const key = typeof publicKey === 'string' ? publicKeyFromRaw(publicKey) : publicKey;
     if (key.asymmetricKeyType !== 'ed25519' || !B64URL_SIG.test(signature)) return false;
-    return edVerify(null, signingMessage(dataHash), key, Buffer.from(signature, 'base64url'));
+    const sig = Buffer.from(signature, 'base64url');
+    // Canonical encoding only: the last of the 86 characters carries 4 unused bits, so without this check several
+    // different strings would decode to the same 64 bytes and a one-character edit could still verify.
+    if (sig.length !== 64 || sig.toString('base64url') !== signature) return false;
+    return edVerify(null, signingMessage(dataHash), key, sig);
   } catch {
     return false;
   }

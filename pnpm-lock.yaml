@@ -124,7 +124,11 @@ importers:
         specifier: ^4.23.15
         version: 4.23.15
 
-  tools/verify-cli: {}
+  tools/verify-cli:
+    dependencies:
+      '@igaro/core':
+        specifier: workspace:^
+        version: link:../../packages/core
 
 packages:
 
