@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { S3Config } from './storage.js';
 
 // Environment parsing for the API. Fails fast (throws ConfigError) on anything invalid.
@@ -54,6 +55,11 @@ export interface Config {
    * import endpoints. 32-512 characters. Unset = those endpoints are not registered. Never logged.
    */
   internalApiToken?: string | undefined;
+  /**
+   * INTERNAL_ALLOWED_CIDRS (T-047, ADR 0035): comma-separated IPs/CIDRs allowed to reach /api/v1/internal/* (socket
+   * peer address, never X-Forwarded-For). Required in production when INTERNAL_API_TOKEN is set. Unset = loopback only.
+   */
+  internalAllowedCidrs?: string[] | undefined;
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
@@ -396,6 +402,10 @@ export function loadConfig(env: Env = process.env): Config {
   // Production must state its proxy topology on purpose: an unset or false value buckets every client behind the
   // ingress under one IP (rate limits, hashed-IP logs).
   const trustProxy = parseTrustProxy(env.TRUST_PROXY);
+  const internalAllowedCidrs = parseInternalAllowlist(env.INTERNAL_ALLOWED_CIDRS);
+  if (nodeEnv === 'production' && internalApiToken && !internalAllowedCidrs) {
+    throw new ConfigError('INTERNAL_ALLOWED_CIDRS is required in production when INTERNAL_API_TOKEN is set');
+  }
   if (nodeEnv === 'production' && trustProxy === false) {
     throw new ConfigError('TRUST_PROXY must be set to a hop count or proxy IPs/CIDRs in production');
   }
@@ -407,6 +417,7 @@ export function loadConfig(env: Env = process.env): Config {
     accountMail,
     deliveryPayloadKey,
     internalApiToken,
+    internalAllowedCidrs,
     auditHeadPublicKeys,
     session,
     tokenTtl,
@@ -426,4 +437,20 @@ export function loadConfig(env: Env = process.env): Config {
       domain: env.COOKIE_DOMAIN || undefined,
     },
   };
+}
+
+/** Parse INTERNAL_ALLOWED_CIDRS: comma-separated IPv4/IPv6 addresses or CIDRs. Unset/empty = undefined. */
+export function parseInternalAllowlist(raw: string | undefined): string[] | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const items = raw.split(',').map((x) => x.trim()).filter(Boolean);
+  for (const it of items) {
+    const [addr, bits, extra] = it.split('/');
+    const fam = addr ? isIP(addr) : 0;
+    const max = fam === 4 ? 32 : 128;
+    if (!fam || extra !== undefined || (bits !== undefined && !(/^\d{1,3}$/.test(bits) && Number(bits) <= max))) {
+      throw new ConfigError('INTERNAL_ALLOWED_CIDRS must be comma-separated IPs or CIDRs');
+    }
+    if (bits !== undefined && Number(bits) === 0) throw new ConfigError('INTERNAL_ALLOWED_CIDRS must not allow every address');
+  }
+  return items;
 }

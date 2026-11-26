@@ -10,7 +10,8 @@ const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
     return [
-      { source: '/api/v1/:path*', destination: `${apiUrl}/api/v1/:path*` },
+      // /api/v1/internal/* (service-to-service, ADR 0035) is never proxied from the public origin.
+      { source: '/api/v1/:path((?!internal(?:/|$)).*)', destination: `${apiUrl}/api/v1/:path*` },
       // Public institution keys (ADR 0023, 0026), linked from the verification page.
       { source: '/i/:slug/keys.json', destination: `${apiUrl}/i/:slug/keys.json` },
     ];

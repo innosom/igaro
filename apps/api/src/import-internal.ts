@@ -13,6 +13,7 @@
 // The body carries only: institution id, an optional sanitised photo, or a fixed failure code.
 //
 // Nothing here logs tokens, salts, keys, names, addresses or photo bytes: ids, row numbers and codes only.
+import { BlockList, isIP } from 'node:net';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import type { PoolClient } from 'pg';
@@ -45,6 +46,8 @@ export interface InternalImportOptions {
   db: Db;
   /** Shared secret. Without it these routes are not registered. */
   token: string;
+  /** Peer IPs/CIDRs allowed (ADR 0035). Unset = loopback only. Matched on the socket address, never X-Forwarded-For. */
+  allowedCidrs?: string[] | undefined;
   storage: ObjectStorage | undefined;
   masterKey: Buffer | undefined;
   maxPhotoBytes: number;
@@ -126,7 +129,25 @@ async function refreshCounts(c: PoolClient, batchId: string): Promise<{ imported
 
 export function registerInternalImport(app: FastifyInstance, o: InternalImportOptions): void {
   const expected = createHash('sha256').update(o.token).digest();
+  const allow = new BlockList();
+  for (const c of o.allowedCidrs ?? ['127.0.0.1/32', '::1/128']) {
+    const [a, b] = c.split('/') as [string, string | undefined];
+    const fam = isIP(a) === 6 ? 'ipv6' : 'ipv4';
+    if (b === undefined) allow.addAddress(a, fam);
+    else allow.addSubnet(a, Number(b), fam);
+  }
+  /** Private-listener rule (ADR 0035): wrong peer, or a request that came through a proxy, looks like no route (404). */
+  const network = (req: FastifyRequest): void => {
+    let peer = req.socket.remoteAddress ?? '';
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(peer);
+    if (mapped?.[1]) peer = mapped[1];
+    const fam = isIP(peer);
+    const viaProxy =
+      req.headers['x-forwarded-for'] !== undefined || req.headers['x-forwarded-host'] !== undefined || req.headers.forwarded !== undefined;
+    if (!fam || viaProxy || !allow.check(peer, fam === 6 ? 'ipv6' : 'ipv4')) throw new NotFoundError();
+  };
   const authenticate = async (req: FastifyRequest): Promise<void> => {
+    network(req);
     const h = req.headers.authorization;
     const m = typeof h === 'string' ? /^Bearer (.+)$/.exec(h) : null;
     const given = createHash('sha256').update(m?.[1] ?? '').digest();

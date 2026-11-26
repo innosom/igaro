@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { generateSigningKey, parseMasterKey } from '@igaro/core';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadWorkerConfig } from './config.js';
 
@@ -48,5 +49,14 @@ describe('import.batch config (T-044)', () => {
       expect((err as Error).message).not.toContain(token);
       expect((err as Error).message).not.toContain('user:pw');
     }
+  });
+
+  it('requires https for INTERNAL_API_URL in production (T-047, ADR 0035)', () => {
+    const wrap = randomBytes(32).toString('base64');
+    const k = generateSigningKey(parseMasterKey(wrap));
+    const head = { AUDIT_HEAD_WRAP_KEY: wrap, AUDIT_HEAD_SIGNING_KEY: k.encryptedPrivateKey, AUDIT_HEAD_KEY_ID: k.kid };
+    const env = { ...base, ...s3, ...head, NODE_ENV: 'production', S3_ENDPOINT: 'https://s3.igaro.test', WEB_BASE_URL: 'https://igaro.test', WORKER_DATABASE_URL: 'postgresql://igaro_worker:pw@127.0.0.1:5432/igaro', INTERNAL_API_TOKEN: token };
+    expect(() => loadWorkerConfig({ ...env, INTERNAL_API_URL: 'http://api.internal:4000/api/v1' })).toThrow(/https in production/);
+    expect(loadWorkerConfig({ ...env, INTERNAL_API_URL: 'https://api.internal/api/v1' }).importBatch?.apiUrl).toBe('https://api.internal/api/v1');
   });
 });

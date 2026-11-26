@@ -18,3 +18,4 @@ dist/
 node_modules
 node_modules/
 !.env.example
+!.env.staging.example

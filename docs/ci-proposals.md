@@ -1,5 +1,9 @@
 # CI proposals
 
+## P-004 (T-047, ADR 0035): deny /api/v1/internal at the ingress
+Defence in depth only (the app already refuses it). In the staging/production ingress config return 404 for
+`/api/v1/internal/`. No `.github/` change is needed for T-047.
+
 Agents cannot edit `.github/`. Proposed changes are described here for the owner to apply.
 
 ## P-001: Quality gate workflow (T-003)
