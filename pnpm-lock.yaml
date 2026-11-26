@@ -68,7 +68,7 @@ importers:
     dependencies:
       next:
         specifier: ^16
-        version: 16.4.6(@opentelemetry/api@1.10.0)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 16.4.6(@opentelemetry/api@1.10.0)(@playwright/test@1.65.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -155,6 +155,18 @@ importers:
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+
+  tools/e2e:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.49.0
+        version: 1.65.1
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
 
   tools/verify-cli:
     dependencies:
@@ -854,6 +866,11 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
+
+  '@playwright/test@1.65.1':
+    resolution: {integrity: sha512-y+NCIRm2LvY4slUVWvGh1nujJ8RF/hEisIsq2mtUPgdQC4L701bq5hZGMhrpeXjACvwvO9tj5dJqhvM6TP9lbw==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@prisma/client@6.19.3':
     resolution: {integrity: sha512-mKq3jQFhjvko5LTJFHGilsuQs+W+T3Gm451NzuTDGQxwCzwXHYnIu2zGkRoW+Exq3Rob7yp2MfzSrdIiZVhrBg==}
@@ -1957,6 +1974,16 @@ packages:
   pkg-types@2.4.0:
     resolution: {integrity: sha512-07Fys7iVx0X6TcviMOgogM1Lk33ZyqOezMnU79S+kffWqwolG/5W9V8EgQSeYCIfFTYVgssRbnH630Oa2+soBA==}
 
+  playwright-core@1.65.1:
+    resolution: {integrity: sha512-hqPpz7blSMPxWVdoeE1yiBSzXsKiVOd2k+kjCvmUywD2GPO2Dd9HfcWnq9NN0GHbNZDFgZ9JfBFr+X5/BLo0qw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.65.1:
+    resolution: {integrity: sha512-vJ1FuoOrNwOKHUIVEvSt3jT1L+wjjDpwhwIstKtfvTh8XIG4FG4bIFuvNdMxi81LGfAhUgUZleVFaOLY4RIUUw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postcss@8.5.23:
     resolution: {integrity: sha512-g50586zr4bZmwFiTlflMu8E0bDTb5I5gertgwAKmsdUlTQIhZtunzUlD1WSzwcVWPoAVpsrA6vlfCD7oXvRwgg==}
     engines: {node: ^10 || ^12 || >=14}
@@ -2843,6 +2870,10 @@ snapshots:
   '@opentelemetry/api@1.10.0': {}
 
   '@pinojs/redact@0.4.0': {}
+
+  '@playwright/test@1.65.1':
+    dependencies:
+      playwright: 1.65.1
 
   '@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)':
     optionalDependencies:
@@ -3776,7 +3807,7 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  next@16.4.6(@opentelemetry/api@1.10.0)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  next@16.4.6(@opentelemetry/api@1.10.0)(@playwright/test@1.65.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       '@next/env': 16.4.6
       '@swc/helpers': 0.5.23
@@ -3796,6 +3827,7 @@ snapshots:
       '@next/swc-win32-arm64-msvc': 16.4.6
       '@next/swc-win32-x64-msvc': 16.4.6
       '@opentelemetry/api': 1.10.0
+      '@playwright/test': 1.65.1
       sharp: 0.35.5(@types/node@22.20.5)
     transitivePeerDependencies:
       - '@babel/core'
@@ -3925,6 +3957,12 @@ snapshots:
       confbox: 0.3.2
       exsolve: 1.2.0
       pathe: 2.0.3
+
+  playwright-core@1.65.1: {}
+
+  playwright@1.65.1:
+    dependencies:
+      playwright-core: 1.65.1
 
   postcss@8.5.23:
     dependencies:

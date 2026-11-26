@@ -453,7 +453,19 @@ describe.skipIf(!url)('internal import endpoints and worker consumer (needs Post
     const n = 500;
     const ids = Array.from({ length: n }, (_, i) => `bulk-${String(i).padStart(4, '0')}`);
     const csv = csvOf(...ids.map((id, i) => `Bulk Person ${i},${id},${id}@example.test,STUDENT_ID,Programme ${i % 7},`));
-    const batchId = await intake(csv, ids.map((id) => ({ name: `${id}.jpg`, data: withExif() })));
+    const photos = ids.map((id) => ({ name: `${id}.jpg`, data: withExif() }));
+
+    // T-048 / white paper s15 (500-holder import): the dry-run preview comes first and writes nothing.
+    const pv = multipartBody([{ name: 'csv', filename: 'people.csv', data: csv }, { name: 'photos', filename: 'p.zip', data: makeZip(photos) }]);
+    const credsPreview = await count('credentials');
+    const batchesPreview = await count('import_batches');
+    const previewRes = await app.inject({ method: 'POST', url: '/api/v1/credentials/import?dryRun=true', headers: { ...a.headers, 'content-type': pv.contentType }, payload: pv.payload });
+    expect(previewRes.statusCode).toBe(200);
+    expect(body(previewRes)).toMatchObject({ dryRun: true, totalRows: n, validRows: n, errorRows: 0, photos: { provided: n, matched: n, unmatched: 0 } });
+    expect(await count('credentials')).toBe(credsPreview);
+    expect(await count('import_batches')).toBe(batchesPreview);
+
+    const batchId = await intake(csv, photos);
     const deliveryBefore = delivery.jobs.length;
     const cardsBefore = cards.jobs.length;
     const credsBefore = await count('credentials');
@@ -486,6 +498,28 @@ describe.skipIf(!url)('internal import endpoints and worker consumer (needs Post
     }
     const chain = await db.withTenant({ kind: 'tenant', userId: U_A, institutionId: INST_A }, (c) => verifyAuditChain(c, INST_A));
     expect(chain.ok).toBe(true);
+
+    // Public verification of a sample of the imported credentials (every 50th) returns VERIFIED, and the status endpoint agrees.
+    const sample = (await ownerQuery(
+      `SELECT c.verification_token FROM import_rows r JOIN credentials c ON c.id = r.credential_id WHERE r.batch_id = $1 AND r.row_number % 50 = 1 ORDER BY r.row_number`,
+      [batchId],
+    )).rows as { verification_token: string }[];
+    expect(sample).toHaveLength(10);
+    for (const s of sample) {
+      const v = await app.inject({ method: 'GET', url: `/api/v1/verify/${s.verification_token}` });
+      expect([v.statusCode, body(v).result]).toEqual([200, 'VERIFIED']);
+    }
+    expect(body(await app.inject({ method: 'GET', url: `/api/v1/credentials/import/${batchId}`, headers: a.headers }))).toMatchObject({
+      status: 'COMPLETED',
+      importedRows: n,
+      errorRows: 0,
+      pendingRows: 0,
+    });
+    // No holder name, address, token or the bearer secret reached the API or worker logs during the 500-row run.
+    const allLogs = logs.join('') + workerLogs.join('');
+    for (const secret of [TOKEN, 'Bulk Person 0', 'bulk-0007@example.test', ...[...tokens].slice(0, 25), ...sample.map((s) => s.verification_token)]) {
+      expect(allLogs).not.toContain(secret);
+    }
     // Informational: wall-clock for the whole import through the API (signing, DB, audit chain per row).
     console.log(`500-holder import took ${seconds.toFixed(1)}s`);
   }, 600_000);
