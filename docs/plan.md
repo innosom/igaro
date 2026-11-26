@@ -90,7 +90,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: `verifyCredential` in packages/core/src/verify.ts, row/tenant binding and fail-closed (ADR 0021). T-032 must not expose `reason`, and must link SUPERSEDED via the verification token.
 - [x] T-032 [owner: igaro-api] [deps: T-031, T-026] Public GET /verify/:token and credential.json, hashed-IP verification log (hashIp + IP_HASH_KEY, ADR 0003), per-IP and per-token rate limits, ops alert on failure
   - Done: apps/api/src/verify.ts, ADR 0022, no migration (existing `app.verification_token` lookup policy); 13 new tests. Open: credential.json discloses the full signed payload to any token holder (owner to confirm); ops alert is a structured log line only; limiter is per process.
-- [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken (lookup by SHA-256 of the token, ADR 0002)
+- [x] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken (lookup by SHA-256 of the token, ADR 0002)
+  - Done: apps/api/src/public-lookups.ts (keys.json at root, GET /holder/:holderToken), ADR 0023, no migration; 10 new tests. Reviewer: ship, 0 Critical/High. Follow-ups: M1 holder-view status not integrity-checked (relabel or run verifyCredential before T-042); L1 narrow keys read policy; L2 no supersededBy link; L3 reuse slug regex; card link null until T-040.
 - [ ] T-034 [owner: igaro-crypto-core] [deps: T-031] tools/verify-cli independent verifier (no iGARO API calls) with tests
 - [ ] T-035 [owner: igaro-web] [deps: T-010] apps/web scaffold, Tailwind, login, invite accept and password reset pages
 - [ ] T-036 [owner: igaro-web] [deps: T-032, T-033, T-035] Public /v/:token page with all result states and data-driven proof panel (Not anchored)
