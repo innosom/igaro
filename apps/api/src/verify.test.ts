@@ -143,7 +143,7 @@ describe.skipIf(!url)('public verification (needs Postgres)', () => {
     expect(body.status).toBe('ACTIVE');
     expect(body.institution).toMatchObject({ name: 'Inst A', slug: 'inst-a' });
     expect(body.holder).toEqual({ fullName: 'Holder A' }); // publicFields = [] by default
-    expect(body.type).toEqual({ code: 'STUDENT_ID', name: 'Student ID', kind: 'ID_CARD' });
+    expect(body.type).toEqual({ code: 'STUDENT_ID', name: 'STUDENT_ID', kind: 'ID_CARD' });
     expect(body.proof).toEqual({ signedBy: 'Inst A', kid: c.payload.issuerKeyId, anchorStatus: 'NOT_ANCHORED' });
     expect(body.supersededBy).toBeNull();
     expect(body.issuedAt).toMatch(/Z$/);
