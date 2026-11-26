@@ -9,7 +9,7 @@ import type { AccountMailQueue } from './notifications.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
 import { InstitutionService, registerInstitutions } from './institutions.js';
-import { SigningKeyService, registerSigningKeys } from './signing-keys.js';
+import { SigningKeyService, registerSigningKeys, type KeyChangeRateLimit } from './signing-keys.js';
 import { DEFAULT_LOGO_MAX_BYTES, registerInstitutionProfile } from './institution-profile.js';
 import { registerCredentialTypes } from './credential-types.js';
 import { CredentialService, registerCredentials } from './credentials.js';
@@ -44,6 +44,8 @@ export interface BuildAppOptions {
   accountMail?: AccountMailQueue;
   /** Private object storage for logos. Without it POST /institution/logo answers 503. */
   storage?: ObjectStorage;
+  /** Per-institution limit for key rotation and compromise (default 10 per hour). */
+  keyChangeRateLimit?: KeyChangeRateLimit;
   /** Log destination; tests capture logs here. */
   logStream?: DestinationStream;
 }
@@ -127,14 +129,22 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           }),
           app.log,
         );
-        registerSigningKeys(api, new SigningKeyService(opts.db, opts.config.masterKey), app.log);
+        registerSigningKeys(
+          api,
+          new SigningKeyService(opts.db, opts.config.masterKey, {
+            ...(opts.keyChangeRateLimit ? { rateLimit: opts.keyChangeRateLimit } : {}),
+            hashIp: (ip) => hashIp(ip, ipHashKey),
+          }),
+          app.log,
+        );
         registerInstitutionProfile(api, {
           db: opts.db,
           storage: opts.storage,
           logoMaxBytes: opts.config.logoMaxBytes ?? DEFAULT_LOGO_MAX_BYTES,
           log: app.log,
+          hashIp: (ip) => hashIp(ip, ipHashKey),
         });
-        registerCredentialTypes(api, { db: opts.db, log: app.log });
+        registerCredentialTypes(api, { db: opts.db, log: app.log, hashIp: (ip) => hashIp(ip, ipHashKey) });
         const credentialOpts = { masterKey: opts.config.masterKey, hashIp: (ip: string | undefined) => hashIp(ip, ipHashKey) };
         registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log);
         registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log);
@@ -144,6 +154,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           storage: opts.storage,
           photoMaxBytes: opts.config.photoMaxBytes ?? DEFAULT_PHOTO_MAX_BYTES,
           log: app.log,
+          hashIp: (ip) => hashIp(ip, ipHashKey),
         });
       }
     },

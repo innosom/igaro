@@ -9,7 +9,11 @@ import type { PoolClient } from 'pg';
 import { generateSigningKey } from '@igaro/core';
 import type { AuthSession } from './auth.js';
 import type { Db, TenantSession } from './db.js';
-import { AppError, NotFoundError } from './errors.js';
+import { appendAudit } from './audit.js';
+import { verifyPassword } from './auth.js';
+import { AppError, NotFoundError, RateLimitedError } from './errors.js';
+import { assertInstitutionActive } from './institution-guard.js';
+import { RateLimiter } from './rate-limit.js';
 
 const MAX_REASON = 500;
 const MAX_KID_ATTEMPTS = 5;
@@ -48,11 +52,47 @@ const toView = (r: KeyRow): KeyView => ({
 const constraintOf = (e: unknown): string | undefined =>
   (e as { code?: string }).code === '23505' ? (e as { constraint?: string }).constraint : undefined;
 
+export interface KeyChangeRateLimit {
+  max: number;
+  windowSeconds: number;
+}
+export const DEFAULT_KEY_CHANGE_RATE_LIMIT: KeyChangeRateLimit = { max: 10, windowSeconds: 3600 };
+
+export interface SigningKeyOptions {
+  rateLimit?: KeyChangeRateLimit;
+  hashIp?: (ip: string | undefined) => string | undefined;
+}
+
 export class SigningKeyService {
+  private readonly limiter: RateLimiter;
+
   constructor(
     private readonly db: Db,
     private readonly masterKey: Buffer | undefined,
-  ) {}
+    private readonly opts: SigningKeyOptions = {},
+  ) {
+    const rl = opts.rateLimit ?? DEFAULT_KEY_CHANGE_RATE_LIMIT;
+    this.limiter = new RateLimiter({ max: rl.max, windowSeconds: rl.windowSeconds });
+  }
+
+  /**
+   * Per-institution rate limit (rotate and compromise share it; wrong passwords count), then password
+   * re-entry against the session user's own hash (ADR 0012 decision 3). Runs before any key change.
+   */
+  private async authorise(session: TenantSession, password: string): Promise<void> {
+    const wait = this.limiter.consume(`keys:${session.institutionId}`);
+    if (wait > 0) throw new RateLimitedError(wait);
+    const hash = await this.db.withTenant(session, async (c) => {
+      const r = await c.query<{ password_hash: string | null }>(
+        `SELECT password_hash FROM users WHERE id = $1 AND institution_id = app_institution_id() AND status = 'ACTIVE'`,
+        [session.userId],
+      );
+      return r.rows[0]?.password_hash ?? null;
+    });
+    if (!(await verifyPassword(hash, password))) {
+      throw new AppError(403, 'PASSWORD_INVALID', 'Password confirmation failed');
+    }
+  }
 
   private requireMaster(): Buffer {
     if (!this.masterKey) {
@@ -72,15 +112,32 @@ export class SigningKeyService {
   }
 
   /** Retire the ACTIVE key (if any) and create a new ACTIVE one, in one transaction. */
-  async rotate(session: TenantSession): Promise<{ active: KeyView; retiredKid: string | null }> {
+  async rotate(
+    session: TenantSession,
+    password: string,
+    ip?: string,
+  ): Promise<{ active: KeyView; retiredKid: string | null }> {
     const master = this.requireMaster();
+    await this.authorise(session, password);
     return this.db.withTenant(session, async (c) => {
       await this.lockInstitution(c);
+      await assertInstitutionActive(c);
       const retired = await c.query<{ kid: string }>(
         `UPDATE institution_keys SET status = 'RETIRED', retired_at = now()
           WHERE institution_id = app_institution_id() AND status = 'ACTIVE' RETURNING kid`,
       );
-      return { active: await this.insertActive(c, master), retiredKid: retired.rows[0]?.kid ?? null };
+      const active = await this.insertActive(c, master);
+      const retiredKid = retired.rows[0]?.kid ?? null;
+      await appendAudit(c, {
+        institutionId: session.institutionId,
+        actorId: session.userId,
+        action: 'key.rotated',
+        targetType: 'institution_key',
+        targetId: active.kid,
+        metadata: { kid: active.kid, retiredKid },
+        ip: this.opts.hashIp?.(ip) ?? null,
+      });
+      return { active, retiredKid };
     });
   }
 
@@ -91,9 +148,13 @@ export class SigningKeyService {
   async markCompromised(
     session: TenantSession,
     kid: string,
+    reason: string,
+    password: string,
+    ip?: string,
   ): Promise<{ key: KeyView; replacement: KeyView | null; previous: KeyStatus }> {
     if (!KID_RE.test(kid)) throw new NotFoundError();
     const master = this.requireMaster();
+    await this.authorise(session, password);
     return this.db.withTenant(session, async (c) => {
       await this.lockInstitution(c);
       const cur = await c.query<KeyRow>(
@@ -110,6 +171,15 @@ export class SigningKeyService {
         [kid],
       );
       const replacement = row.status === 'ACTIVE' ? await this.insertActive(c, master) : null;
+      await appendAudit(c, {
+        institutionId: session.institutionId,
+        actorId: session.userId,
+        action: 'key.compromised',
+        targetType: 'institution_key',
+        targetId: kid,
+        metadata: { kid, previousStatus: row.status, replacementKid: replacement?.kid ?? null, reason },
+        ip: this.opts.hashIp?.(ip) ?? null,
+      });
       return { key: toView(upd.rows[0]!), replacement, previous: row.status };
     });
   }
@@ -149,6 +219,16 @@ const tenantScope = (req: FastifyRequest): TenantSession => {
   return { kind: 'tenant', userId: s.userId, institutionId: s.institutionId };
 };
 
+/** Password re-entry (ADR 0012 decision 3). Never echoed or logged. */
+function parsePassword(body: unknown): string {
+  const p =
+    body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).password : undefined;
+  if (typeof p !== 'string' || p.length === 0 || p.length > 1024) {
+    throw new AppError(400, 'PASSWORD_REQUIRED', 'Password confirmation is required');
+  }
+  return p;
+}
+
 export function registerSigningKeys(app: FastifyInstance, svc: SigningKeyService, log: FastifyBaseLogger): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
 
@@ -160,8 +240,7 @@ export function registerSigningKeys(app: FastifyInstance, svc: SigningKeyService
   app.post('/institution/keys/rotate', ia, async (req, reply) => {
     void reply.header('Cache-Control', 'no-store');
     const scope = tenantScope(req);
-    const out = await svc.rotate(scope);
-    // TODO(T-024): audit_logs entry in the same transaction.
+    const out = await svc.rotate(scope, parsePassword(req.body), req.ip);
     log.info(
       {
         event: 'key.rotated',
@@ -186,9 +265,9 @@ export function registerSigningKeys(app: FastifyInstance, svc: SigningKeyService
       throw new AppError(400, 'BAD_REQUEST', 'Invalid request');
     }
     const scope = tenantScope(req);
-    const out = await svc.markCompromised(scope, kid);
+    const out = await svc.markCompromised(scope, kid, reason.trim(), parsePassword(b), req.ip);
     if (out.previous !== 'COMPROMISED') {
-      // TODO(T-024): audit_logs entry (reason stored there). Until then the reason is only in this log line.
+      // The reason lives only in the audit entry (same transaction), never in application logs.
       log.warn(
         {
           event: 'key.compromised',
@@ -197,7 +276,6 @@ export function registerSigningKeys(app: FastifyInstance, svc: SigningKeyService
           kid,
           from: out.previous,
           replacementKid: out.replacement?.kid ?? null,
-          reason: reason.trim(),
         },
         'signing key marked compromised',
       );

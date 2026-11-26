@@ -5,6 +5,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import multipart from '@fastify/multipart';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { PoolClient } from 'pg';
+import { appendAudit } from './audit.js';
+import { assertInstitutionActive } from './institution-guard.js';
 import type { AuthSession } from './auth.js';
 import { isUuid, type Db, type TenantSession } from './db.js';
 import { AppError, NotFoundError } from './errors.js';
@@ -164,7 +167,25 @@ export class HolderRepository {
   constructor(
     private readonly db: Db,
     private readonly session: TenantSession,
+    private readonly ipHash: string | null = null,
   ) {}
+
+  private audit(c: PoolClient, action: string, targetId: string, metadata: Record<string, unknown>) {
+    return appendAudit(c, {
+      institutionId: this.session.institutionId,
+      actorId: this.session.userId,
+      action,
+      targetType: 'holder',
+      targetId,
+      metadata,
+      ip: this.ipHash,
+    });
+  }
+
+  /** Early check (before an upload body is read or stored); setPhoto re-checks inside its transaction. */
+  async assertActive(): Promise<void> {
+    await this.db.withTenant(this.session, assertInstitutionActive);
+  }
 
   async list(q: ListQuery): Promise<{ items: HolderView[]; total: number; limit: number; offset: number }> {
     return this.db.withTenant(this.session, async (c) => {
@@ -207,6 +228,7 @@ export class HolderRepository {
           [id, input.fullName, input.externalId ?? null, input.email ?? null],
         );
         const r = await c.query<Row>(`${SELECT} WHERE h.id = $1 AND h.institution_id = app_institution_id()`, [id]);
+        await this.audit(c, 'holder.created', id, {});
         return toView(r.rows[0]!);
       });
     } catch (e) {
@@ -234,6 +256,7 @@ export class HolderRepository {
           params,
         );
         if (u.rowCount === 0) throw new NotFoundError();
+        await this.audit(c, 'holder.updated', id, { fields: Object.keys(patch) }); // names only, never PII values
         const r = await c.query<Row>(`${SELECT} WHERE h.id = $1 AND h.institution_id = app_institution_id()`, [id]);
         return toView(r.rows[0]!);
       });
@@ -255,6 +278,7 @@ export class HolderRepository {
   ): Promise<{ view: HolderView; previousKey: string | null }> {
     if (!isUuid(id)) throw new NotFoundError();
     return this.db.withTenant(this.session, async (c) => {
+      await assertInstitutionActive(c);
       const cur = await c.query<{ photo_key: string | null; photo_sha256: string | null }>(
         `SELECT photo_key, photo_sha256 FROM credential_holders
           WHERE id = $1 AND institution_id = app_institution_id() FOR UPDATE`,
@@ -277,6 +301,7 @@ export class HolderRepository {
         );
         if (used.rowCount) deletable = false;
       }
+      await this.audit(c, 'holder.photo_updated', id, { photoSha256: sha256, previousPhotoSha256: prev.photo_sha256 });
       const r = await c.query<Row>(`${SELECT} WHERE h.id = $1 AND h.institution_id = app_institution_id()`, [id]);
       return { view: toView(r.rows[0]!), previousKey: deletable ? prev.photo_key : null };
     });
@@ -300,6 +325,7 @@ export class HolderRepository {
         );
         if (n.rows[0]!.n > 0) throw hasCredentials();
         await c.query(`DELETE FROM credential_holders WHERE id = $1 AND institution_id = app_institution_id()`, [id]);
+        await this.audit(c, 'holder.deleted', id, {});
         return cur.rows[0].photo_key;
       });
     } catch (e) {
@@ -324,11 +350,12 @@ export interface HolderRoutesOptions {
   storage: ObjectStorage | undefined;
   photoMaxBytes: number;
   log: FastifyBaseLogger;
+  hashIp?: (ip: string | undefined) => string | undefined;
 }
 
 export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
-  const repo = (req: FastifyRequest) => new HolderRepository(o.db, tenantScope(req));
+  const repo = (req: FastifyRequest) => new HolderRepository(o.db, tenantScope(req), o.hashIp?.(req.ip) ?? null);
   const noStore = (reply: { header: (k: string, v: string) => unknown }) => void reply.header('Cache-Control', 'no-store');
 
   const withPhotoUrl = async (view: HolderView, key: string | null): Promise<HolderView> => {
@@ -346,7 +373,6 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
     const scope = tenantScope(req);
     const input = parseHolderBody(req.body, 'create');
     const view = await repo(req).create(input);
-    // TODO(T-024): audit_logs entry in the same transaction. Until then ids and field names only, no PII values.
     o.log.info(
       { event: 'holder.created', actorId: scope.userId, institutionId: scope.institutionId, holderId: view.id },
       'holder created',
@@ -366,7 +392,6 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
     const id = (req.params as { id: string }).id;
     const patch = parseHolderBody(req.body, 'patch');
     const view = await repo(req).update(id, patch);
-    // TODO(T-024): audit entry. Field names only; never the values.
     o.log.info(
       { event: 'holder.updated', actorId: scope.userId, institutionId: scope.institutionId, holderId: view.id, fields: Object.keys(patch) },
       'holder updated',
@@ -385,7 +410,6 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
         o.log.warn({ event: 'holder.photo_cleanup_failed', institutionId: scope.institutionId }, 'photo not deleted');
       });
     }
-    // TODO(T-024): audit entry in the same transaction as the delete.
     o.log.info(
       { event: 'holder.deleted', actorId: scope.userId, institutionId: scope.institutionId, holderId: id },
       'holder deleted',
@@ -405,6 +429,7 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
       const id = (req.params as { id: string }).id;
       if (!o.storage) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'File storage is not available');
       await repo(req).get(id); // 404 before reading the body when the holder is not ours
+      await repo(req).assertActive(); // suspended institution: refuse before reading or storing anything
 
       const { type, bytes } = await readImageUpload(req, 'Photo');
       // Hash of exactly the bytes that are stored (after stripping), as credential payloads commit to it.
@@ -427,7 +452,6 @@ export function registerHolders(app: FastifyInstance, o: HolderRoutesOptions): v
           o.log.warn({ event: 'holder.photo_cleanup_failed', institutionId: scope.institutionId }, 'old photo not deleted');
         });
       }
-      // TODO(T-024): audit entry (photo changed, new photoSha256).
       o.log.info(
         { event: 'holder.photo_updated', actorId: scope.userId, institutionId: scope.institutionId, holderId: id },
         'holder photo updated',

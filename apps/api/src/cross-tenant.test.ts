@@ -178,11 +178,11 @@ describe.skipIf(!url)('cross-tenant 404 across the MVP admin routes (needs Postg
     expect(listA).not.toContain(KID_B);
     expect(listB).toContain(KID_B);
     expect(listB).not.toContain(KID_A);
-    await expect404(a, 'POST', `/institution/keys/${KID_B}/compromise`, { reason: 'attack' });
-    await expect404(b, 'POST', `/institution/keys/${KID_A}/compromise`, { reason: 'attack' });
-    await expect404(a, 'POST', `/institution/keys/${MISSING_KID}/compromise`, { reason: 'attack' });
+    await expect404(a, 'POST', `/institution/keys/${KID_B}/compromise`, { reason: 'attack', password: PW });
+    await expect404(b, 'POST', `/institution/keys/${KID_A}/compromise`, { reason: 'attack', password: PW });
+    await expect404(a, 'POST', `/institution/keys/${MISSING_KID}/compromise`, { reason: 'attack', password: PW });
     // Positive control: the same well-formed kid works for its own tenant, so the 404s above are tenancy, not shape.
-    expect((await call(a, 'POST', `/institution/keys/${KID_A}/compromise`, { reason: 'control' })).statusCode).toBe(200);
+    expect((await call(a, 'POST', `/institution/keys/${KID_A}/compromise`, { reason: 'control', password: PW })).statusCode).toBe(200);
     // B's key must be untouched by everything A did (the control above only compromised A's own key).
     const rows = await ownerRows(`SELECT status FROM institution_keys WHERE kid = $1`, [KID_B]);
     expect(rows.map((r) => r.status)).toEqual(['ACTIVE']);

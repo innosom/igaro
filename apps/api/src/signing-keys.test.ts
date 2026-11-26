@@ -153,9 +153,9 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
 
   it('401 without a session, 403 for a platform admin', async () => {
     expect((await call(null, 'GET', '')).statusCode).toBe(401);
-    expect((await call(null, 'POST', '/rotate', {})).statusCode).toBe(401);
+    expect((await call(null, 'POST', '/rotate', { password: PW })).statusCode).toBe(401);
     expect((await call(pa, 'GET', '')).statusCode).toBe(403);
-    expect((await call(pa, 'POST', '/rotate', {})).statusCode).toBe(403);
+    expect((await call(pa, 'POST', '/rotate', { password: PW })).statusCode).toBe(403);
     expect((await keysOf(INST_A)).length).toBe(1);
   });
 
@@ -179,7 +179,7 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
   });
 
   it('rotate retires the old key and creates one new ACTIVE key', async () => {
-    const res = await call(a, 'POST', '/rotate', {});
+    const res = await call(a, 'POST', '/rotate', { password: PW });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.retiredKid).toBe(kids[INST_A]);
@@ -195,7 +195,7 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
   });
 
   it('concurrent rotations leave exactly one ACTIVE key', async () => {
-    const rs = await Promise.all([call(a, 'POST', '/rotate', {}), call(a, 'POST', '/rotate', {}), call(a, 'POST', '/rotate', {})]);
+    const rs = await Promise.all([1, 2, 3].map(() => call(a, 'POST', '/rotate', { password: PW })));
     expect(rs.map((r) => r.statusCode)).toEqual([201, 201, 201]);
     const rows = await keysOf(INST_A);
     expect(rows.filter((r) => r.status === 'ACTIVE').length).toBe(1);
@@ -203,14 +203,14 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
   });
 
   it('compromise requires a reason', async () => {
-    expect((await call(a, 'POST', `/${kids.aNew}/compromise`, {})).json().error?.code ?? '').toBe('REASON_REQUIRED');
-    expect((await call(a, 'POST', `/${kids.aNew}/compromise`, { reason: '  ' })).statusCode).toBe(400);
+    expect((await call(a, 'POST', `/${kids.aNew}/compromise`, { password: PW })).json().error?.code ?? '').toBe('REASON_REQUIRED');
+    expect((await call(a, 'POST', `/${kids.aNew}/compromise`, { reason: '  ', password: PW })).statusCode).toBe(400);
     expect((await keysOf(INST_A)).find((r) => r.kid === kids.aNew)!.status).toBe('RETIRED');
   });
 
   it('compromising a RETIRED key marks it and creates no replacement', async () => {
     const before = (await keysOf(INST_A)).length;
-    const res = await call(a, 'POST', `/${kids.aNew}/compromise`, { reason: 'laptop stolen' });
+    const res = await call(a, 'POST', `/${kids.aNew}/compromise`, { reason: 'laptop stolen', password: PW });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ key: { kid: kids.aNew, status: 'COMPROMISED' }, replacement: null, previous: 'RETIRED' });
     expect((await keysOf(INST_A)).length).toBe(before);
@@ -218,7 +218,7 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
 
   it('compromising the ACTIVE key creates a replacement atomically; repeat is idempotent', async () => {
     const active = (await keysOf(INST_A)).find((r) => r.status === 'ACTIVE')!.kid;
-    const res = await call(a, 'POST', `/${active}/compromise`, { reason: 'key leaked' });
+    const res = await call(a, 'POST', `/${active}/compromise`, { reason: 'key leaked', password: PW });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.key.status).toBe('COMPROMISED');
@@ -226,21 +226,21 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
     const rows = await keysOf(INST_A);
     expect(rows.filter((r) => r.status === 'ACTIVE').map((r) => r.kid)).toEqual([body.replacement.kid]);
     const n = rows.length;
-    const again = await call(a, 'POST', `/${active}/compromise`, { reason: 'again' });
+    const again = await call(a, 'POST', `/${active}/compromise`, { reason: 'again', password: PW });
     expect(again.statusCode).toBe(200);
     expect(again.json().replacement).toBeNull();
     expect((await keysOf(INST_A)).length).toBe(n);
   });
 
   it('cross-tenant: another institution\'s kid is 404 and unchanged; own list excludes it', async () => {
-    const res = await call(b, 'POST', `/${kids.aNew}/compromise`, { reason: 'x' });
+    const res = await call(b, 'POST', `/${kids.aNew}/compromise`, { reason: 'x', password: PW });
     expect(res.statusCode).toBe(404);
-    const resA = await call(a, 'POST', `/${kids[INST_B]}/compromise`, { reason: 'x' });
+    const resA = await call(a, 'POST', `/${kids[INST_B]}/compromise`, { reason: 'x', password: PW });
     expect(resA.statusCode).toBe(404);
     expect((await keysOf(INST_B)).map((r) => r.status)).toEqual(['ACTIVE']);
     const list = (await call(b, 'GET', '')).json().items.map((k: { kid: string }) => k.kid);
     expect(list).toEqual([kids[INST_B]]);
-    expect((await call(a, 'POST', '/not-a-kid/compromise', { reason: 'x' })).statusCode).toBe(404);
+    expect((await call(a, 'POST', '/not-a-kid/compromise', { reason: 'x', password: PW })).statusCode).toBe(404);
   });
 
   it('DB refuses reactivating a key or changing a COMPROMISED one, whatever the role', async () => {
@@ -260,7 +260,7 @@ describe.skipIf(!url)('signing keys: rotate and compromise (needs Postgres)', ()
 
   it('rotation of B does not touch A, and logs hold no key material', async () => {
     const aBefore = await keysOf(INST_A);
-    expect((await call(b, 'POST', '/rotate', {})).statusCode).toBe(201);
+    expect((await call(b, 'POST', '/rotate', { password: PW })).statusCode).toBe(201);
     expect(await keysOf(INST_A)).toEqual(aBefore);
     const all = logs.join('');
     expect(all).not.toContain(MASTER.toString('base64'));
@@ -272,7 +272,7 @@ describe.skipIf(!url)('signing keys without a master key (needs Postgres)', () =
   it('rotate answers 503 KEY_CUSTODY_UNAVAILABLE', async () => {
     const { SigningKeyService } = await import('./signing-keys.js');
     const svc = new SigningKeyService({} as Db, undefined);
-    await expect(svc.rotate({ kind: 'tenant', userId: 'u', institutionId: INST_A })).rejects.toMatchObject({
+    await expect(svc.rotate({ kind: 'tenant', userId: 'u', institutionId: INST_A }, 'pw')).rejects.toMatchObject({
       statusCode: 503,
       code: 'KEY_CUSTODY_UNAVAILABLE',
     });
