@@ -5,7 +5,7 @@
 | 1 | Forged or edited card/PDF | Ed25519 signature; verification page recomputes hash; photo hash signed | none |
 | 2 | Insider edits DB row | Integrity checked before status -> VERIFICATION FAILED + alert; REVOKED-final trigger; append-only hash-chained audit with signed, timestamped daily head | Per-credential external timestamp waits for Phase 1 anchoring |
 | 3 | Insider rewrites whole audit chain | Daily head hash signed + OpenTimestamps; verify-chain compares to heads | Up to 24h window of undetected tail edits |
-| 4 | Compromised server / master key | Private keys AES-256-GCM under master key outside DB; decrypt only at signing; KMS in production; key marked COMPROMISED fails all its credentials | Server compromise can sign fraudulently until detected; HSM/KMS Phase 1 |
+| 4 | Compromised server / master key | Private keys AES-256-GCM under master key outside DB; decrypt only at signing; KMS in production; key marked COMPROMISED fails all its credentials. The worker never reads `MASTER_KEY`: the daily-head platform key is wrapped under a separate `AUDIT_HEAD_WRAP_KEY`, so a worker compromise yields only the head key, not institution keys (ADR 0019) | Server compromise can sign fraudulently until detected; HSM/KMS Phase 1 |
 | 5 | URL enumeration | 128-bit random verification token; credential number never a lookup key; per-IP and per-token rate limits | none |
 | 6 | Phishing / fake QR | Card text "Verify only at verify.igaro.app"; QR holds URL only | User behaviour |
 | 7 | Stolen admin account | Argon2id, login rate limiting, httpOnly Secure cookies, hashed session tokens, audit of all actions | MFA/SSO out of scope (Phase 1) |

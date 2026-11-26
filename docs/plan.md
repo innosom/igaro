@@ -78,7 +78,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: POST /credentials/:id/{suspend,reinstate,revoke,reissue} (credential-lifecycle.ts, ADR 0017); 14 new tests, 283 api tests pass; review ship, 0 Critical/High. Follow-ups: M1 SUSPENDED to REVOKED owner decision (ADR 0014 M4); L1 no forward link on revoked-then-reissued; L2 partial unique index for reissuedFrom; L3 clearer error for expired reissue.
 - [x] T-027 [owner: igaro-api] [deps: T-025] Credentials list/get with search and filter, dashboard stats, audit-logs, verify-chain endpoints
   - Done: credential-queries.ts, ADR 0018; 295 api tests pass; review ship, 0 Critical/High. Follow-ups (T-028): verify head signatures and restrict audit_head_hashes INSERT to the worker path; head position check; rate-limit verify-chain; event payload allowlist.
-- [ ] T-028 [owner: igaro-worker] [deps: T-024, T-011] Daily audit head hash job: sign and timestamp with OpenTimestamps, store proof
+- [x] T-028 [owner: igaro-worker] [deps: T-024, T-011] Daily audit head hash job: sign and timestamp with OpenTimestamps, store proof
+  - Done: `audit.dailyHead` (apps/worker/src/audit-head.ts, ots.ts), platform-key head signing with domain prefix in core, `audit_head_timestamps` append-only proof table, `igaro_worker` role and worker-only head INSERT, verify-chain checks head signatures; ADR 0019. Follow-ups: platform must create the `igaro_worker` login, `AUDIT_HEAD_SIGNING_KEY` and `AUDIT_HEAD_PUBLIC_KEYS`; owner to confirm platform-key (not institution-key) signing; proof status/download endpoint; QA `ots verify` check.
 - [ ] T-029 [owner: igaro-qa] [deps: T-026, T-027, T-028] Tamper, lifecycle, REVOKED-final, audit-chain-vs-signed-head and cross-tenant tests for credentials
 - [ ] T-030 [owner: igaro-security-reviewer] [deps: T-029] W3 review (signing, canonicalization, audit chain, no secrets in logs)
 

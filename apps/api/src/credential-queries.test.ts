@@ -5,10 +5,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
-import { generateSigningKey } from '@igaro/core';
+import { generateKeyPairSync } from 'node:crypto';
+import { generateSigningKey, signAuditHead } from '@igaro/core';
 import { buildApp } from './app.js';
 import { csrfTokenFor, hashPassword } from './auth.js';
 import { parseAuditListQuery, parseCredentialListQuery } from './credential-queries.js';
+import { parseAuditHeadPublicKeys } from './config.js';
 import { Db } from './db.js';
 import { MemoryObjectStorage } from './storage.js';
 
@@ -27,7 +29,15 @@ const PW = 'correct horse battery staple';
 const json = { 'content-type': 'application/json' };
 const BIG = { ipMax: 10000, accountMax: 10000, windowSeconds: 900 };
 const rateLimit = { login: BIG, reset: BIG, token: { ipMax: 10000, windowSeconds: 900 } };
-const PHOTO_SHA = createHash('sha256').update('photo-a').digest('hex');
+// Platform audit-head signer (T-028): the API only holds its PUBLIC key.
+const HEAD_KID = 'head-test';
+const headPair = generateKeyPairSync('ed25519');
+const headKey = {
+  publicKey: (headPair.publicKey.export({ type: 'spki', format: 'der' }) as Buffer).subarray(-32).toString('base64url'),
+};
+const signHead = (institutionId: string, day: string, headHash: string) =>
+  signAuditHead({ institutionId, day, headHash }, headPair.privateKey);
+const PHOTO_SHA =createHash('sha256').update('photo-a').digest('hex');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Client {
@@ -40,6 +50,19 @@ interface Issued {
   holderToken: string;
   payload: { salt: string };
 }
+
+describe('AUDIT_HEAD_PUBLIC_KEYS parsing (unit)', () => {
+  it('accepts kid:key pairs and refuses anything else', () => {
+    expect(parseAuditHeadPublicKeys(undefined)).toEqual({});
+    expect(parseAuditHeadPublicKeys(`k1:${headKey.publicKey}, k2:${headKey.publicKey}`)).toEqual({
+      k1: headKey.publicKey,
+      k2: headKey.publicKey,
+    });
+    for (const bad of ['k1', 'k1:short', `k1:${headKey.publicKey}:x`, `bad kid:${headKey.publicKey}`]) {
+      expect(() => parseAuditHeadPublicKeys(bad)).toThrow(/AUDIT_HEAD_PUBLIC_KEYS/);
+    }
+  });
+});
 
 describe('list query parsing (unit)', () => {
   it('validates filters, limit and cursor and rejects unknown parameters', () => {
@@ -142,7 +165,11 @@ describe.skipIf(!url)('credential queries (needs Postgres)', () => {
     }
 
     db = new Db({ connectionString: url!, max: 8, poolConfig: { options: `-c search_path=${schema} -c role=igaro_app` } });
-    app = await buildApp({ config: { logLevel: 'silent', rateLimit, masterKey: master }, db, storage: new MemoryObjectStorage() });
+    app = await buildApp({
+      config: { logLevel: 'silent', rateLimit, masterKey: master, auditHeadPublicKeys: { [HEAD_KID]: headKey.publicKey } },
+      db,
+      storage: new MemoryObjectStorage(),
+    });
     a = await loginAs('a@example.test');
     b = await loginAs('b@example.test');
 
@@ -309,19 +336,45 @@ describe.skipIf(!url)('credential queries (needs Postgres)', () => {
   it('verify-chain: matches a signed head, then detects tampering and a head the chain no longer contains', async () => {
     const heads = (await ownerQuery(`SELECT entry_hash, seq FROM audit_logs WHERE institution_id = $1 ORDER BY seq DESC LIMIT 1`, [INST_A])).rows[0];
     await ownerQuery(
-      `INSERT INTO audit_head_hashes (id, institution_id, day, head_hash, signature, signer_kid) VALUES (gen_random_uuid(), $1, '2026-11-24', $2, 'sig', 'kid')`,
-      [INST_A, heads.entry_hash],
+      `INSERT INTO audit_head_hashes (id, institution_id, day, head_hash, signature, signer_kid) VALUES (gen_random_uuid(), $1, '2026-11-24', $2, $3, $4)`,
+      [INST_A, heads.entry_hash, signHead(INST_A, '2026-11-24', heads.entry_hash), HEAD_KID],
     );
     const ok = (await get(a, '/audit-logs/verify-chain')).json();
-    expect(ok).toMatchObject({ valid: true, headsRecorded: true, signedHeads: { checked: 1, matched: 1, mismatchedDays: [] } });
+    expect(ok).toMatchObject({
+      valid: true,
+      headsRecorded: true,
+      signedHeads: { checked: 1, matched: 1, mismatchedDays: [], signaturesVerified: 1, signatureInvalidDays: [], signatureUnverifiedDays: [] },
+    });
+
+    // M1: with public keys configured, a head under an unknown kid is a failure (forged or injected head).
+    await ownerQuery(
+      `INSERT INTO audit_head_hashes (id, institution_id, day, head_hash, signature, signer_kid) VALUES (gen_random_uuid(), $1, '2026-11-22', $2, 'sig', 'kid-unknown')`,
+      [INST_A, heads.entry_hash],
+    );
+    expect((await get(a, '/audit-logs/verify-chain')).json()).toMatchObject({
+      valid: false,
+      headsRecorded: false,
+      signedHeads: { checked: 2, signaturesVerified: 1, signatureUnverifiedDays: ['2026-11-22'], signatureInvalidDays: [] },
+    });
+
+    // A forged signature (right kid, entry present in the chain, but signed for another day) is invalid.
+    await ownerQuery(
+      `INSERT INTO audit_head_hashes (id, institution_id, day, head_hash, signature, signer_kid) VALUES (gen_random_uuid(), $1, '2026-11-21', $2, $3, $4)`,
+      [INST_A, heads.entry_hash, signHead(INST_A, '2026-11-20', heads.entry_hash), HEAD_KID],
+    );
+    expect((await get(a, '/audit-logs/verify-chain')).json()).toMatchObject({
+      valid: false,
+      headsRecorded: false,
+      signedHeads: { signatureInvalidDays: ['2026-11-21'] },
+    });
 
     // A bogus signed head (e.g. the chain was rewritten after it was signed) is reported.
     await ownerQuery(
-      `INSERT INTO audit_head_hashes (id, institution_id, day, head_hash, signature, signer_kid) VALUES (gen_random_uuid(), $1, '2026-11-23', $2, 'sig', 'kid')`,
-      [INST_A, 'f'.repeat(64)],
+      `INSERT INTO audit_head_hashes (id, institution_id, day, head_hash, signature, signer_kid) VALUES (gen_random_uuid(), $1, '2026-11-23', $2, $3, $4)`,
+      [INST_A, 'f'.repeat(64), signHead(INST_A, '2026-11-23', 'f'.repeat(64)), HEAD_KID],
     );
     const bad = (await get(a, '/audit-logs/verify-chain')).json();
-    expect(bad).toMatchObject({ valid: false, headsRecorded: false, signedHeads: { checked: 2, matched: 1, mismatchedDays: ['2026-11-23'] } });
+    expect(bad).toMatchObject({ valid: false, headsRecorded: false, signedHeads: { checked: 4, matched: 3, mismatchedDays: ['2026-11-23'] } });
 
     // Tamper with one entry in place (the owner bypasses the append-only trigger, as a DB-level attacker would).
     const target = (await ownerQuery(`SELECT seq FROM audit_logs WHERE institution_id = $1 ORDER BY seq OFFSET 2 LIMIT 1`, [INST_A])).rows[0].seq as string;

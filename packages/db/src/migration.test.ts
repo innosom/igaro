@@ -26,6 +26,7 @@ const TENANT_TABLES = [
   'verification_logs',
   'audit_logs',
   'audit_head_hashes',
+  'audit_head_timestamps',
   'import_batches',
   'import_rows',
 ];
