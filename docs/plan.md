@@ -86,7 +86,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: review found 1 High (key rotate/compromise unaudited, no password re-entry/rate limit), fixed with M1/M2/L3; re-review approve. Follow-ups in ADR 0020.
 
 ## W4 Verification, keys.json, CLI
-- [ ] T-031 [owner: igaro-crypto-core] [deps: T-022, T-023] Verification algorithm in packages/core following invariant 7 order
+- [x] T-031 [owner: igaro-crypto-core] [deps: T-022, T-023] Verification algorithm in packages/core following invariant 7 order
+  - Done: `verifyCredential` in packages/core/src/verify.ts, row/tenant binding and fail-closed (ADR 0021). T-032 must not expose `reason`, and must link SUPERSEDED via the verification token.
 - [ ] T-032 [owner: igaro-api] [deps: T-031, T-026] Public GET /verify/:token and credential.json, hashed-IP verification log (hashIp + IP_HASH_KEY, ADR 0003), per-IP and per-token rate limits, ops alert on failure
 - [ ] T-033 [owner: igaro-api] [deps: T-017] Public /i/:slug/keys.json and GET /holder/:holderToken (lookup by SHA-256 of the token, ADR 0002)
 - [ ] T-034 [owner: igaro-crypto-core] [deps: T-031] tools/verify-cli independent verifier (no iGARO API calls) with tests

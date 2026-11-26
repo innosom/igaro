@@ -5,3 +5,4 @@ export * from './credential.js';
 export * from './lifecycle.js';
 export * from './audit-chain.js';
 export * from './anchor.js';
+export * from './verify.js';
