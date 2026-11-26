@@ -125,7 +125,7 @@ describe('card proxy helpers', () => {
         pull(c) {
           if (i >= chunks.length) return c.close();
           pulled++;
-          c.enqueue(new Uint8Array(chunks[i++]).fill(1));
+          c.enqueue(new Uint8Array(chunks[i++] ?? 0).fill(1));
         },
       });
       return { res: new Response(stream), pulled: () => pulled };

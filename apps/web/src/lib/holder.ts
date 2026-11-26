@@ -149,7 +149,7 @@ export function parseSignedLocation(loc: string | null, allowedOrigin: string | 
  * Reads a body with a running byte count and aborts past maxBytes. Returns null when over the cap or empty, or when
  * Content-Length is present but not a plain non-negative integer or exceeds the cap.
  */
-export async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array | null> {
+export async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const cl = res.headers.get('content-length');
   if (cl !== null && (!/^\d{1,12}$/.test(cl) || Number(cl) > maxBytes)) {
     await res.body?.cancel().catch(() => undefined);
