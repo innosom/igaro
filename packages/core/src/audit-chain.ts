@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, sign as edSign, verify as edVerify, type KeyObject } from 'node:crypto';
 import { canonicalize } from './canonicalize.js';
+import { publicKeyFromRaw } from './keys.js';
 
 /** prev_hash of the first entry of every chain. */
 export const AUDIT_GENESIS_HASH = '0'.repeat(64);
@@ -53,4 +54,53 @@ export function verifyChain(entries: readonly ChainedEntry[], startPrev: string 
     lastSeq = seq;
   }
   return { ok: true, head: prev };
+}
+
+/** Domain separation for signed audit chain heads. Never shared with credentials (igaro.credential.sig.v1:). */
+export const AUDIT_HEAD_SIGNATURE_DOMAIN = 'igaro.audit.head.sig.v1:';
+
+export interface AuditHeadStatement {
+  /** null = the platform chain. */
+  institutionId: string | null;
+  /** UTC calendar day the head was taken for, YYYY-MM-DD. */
+  day: string;
+  /** entry_hash of the latest entry of that chain (64 lowercase hex). */
+  headHash: string;
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Exact bytes that are signed (and timestamped, as SHA-256 of these bytes):
+ * "igaro.audit.head.sig.v1:" + (institutionId | "platform") + ":" + day + ":" + headHash.
+ * Binding the chain and day stops a head being replayed for another chain or date.
+ */
+export function auditHeadMessage(s: AuditHeadStatement): Buffer {
+  if (!HEX64.test(s.headHash)) throw new Error('audit head: headHash must be 64 lowercase hex chars');
+  if (!DAY.test(s.day)) throw new Error('audit head: day must be YYYY-MM-DD');
+  if (s.institutionId !== null && !UUID.test(s.institutionId)) {
+    throw new Error('audit head: institutionId must be a lowercase uuid or null');
+  }
+  return Buffer.from(`${AUDIT_HEAD_SIGNATURE_DOMAIN}${s.institutionId ?? 'platform'}:${s.day}:${s.headHash}`, 'utf8');
+}
+
+export function signAuditHead(s: AuditHeadStatement, privateKey: KeyObject): string {
+  if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('signing key must be Ed25519');
+  return edSign(null, auditHeadMessage(s), privateKey).toString('base64url');
+}
+
+/** `publicKey` is a KeyObject or the raw base64url key. Returns false on any malformed input. */
+export function verifyAuditHeadSignature(
+  s: AuditHeadStatement,
+  signature: string,
+  publicKey: KeyObject | string,
+): boolean {
+  try {
+    const key = typeof publicKey === 'string' ? publicKeyFromRaw(publicKey) : publicKey;
+    if (key.asymmetricKeyType !== 'ed25519' || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return false;
+    return edVerify(null, auditHeadMessage(s), key, Buffer.from(signature, 'base64url'));
+  } catch {
+    return false;
+  }
 }

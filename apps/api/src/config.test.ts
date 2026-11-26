@@ -102,7 +102,11 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...prod, MASTER_KEY: key, COOKIE_SECURE: 'false' })).toThrow(
       /COOKIE_SECURE/,
     );
-    expect(loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key }).cookie.secure).toBe(true);
+    const pub = 'A'.repeat(43);
+    expect(() => loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key })).toThrow(/AUDIT_HEAD_PUBLIC_KEYS is required/);
+    expect(
+      loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key, AUDIT_HEAD_PUBLIC_KEYS: `k1:${pub}` }).cookie.secure,
+    ).toBe(true);
   });
 
   it('hashes IPs with IP_HASH_KEY (ADR 0003), required in production', () => {
@@ -116,6 +120,8 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ ...good, NODE_ENV: 'production', MASTER_KEY: key, COOKIE_SECURE: 'true' }),
     ).toThrow(/IP_HASH_KEY is required/);
+    // Not configured outside production: still allowed.
+    expect(loadConfig(good).auditHeadPublicKeys).toEqual({});
   });
 
   it('parses session lifetimes (ADR 0004) and validates them', () => {

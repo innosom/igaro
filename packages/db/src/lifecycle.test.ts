@@ -695,7 +695,11 @@ describe.skipIf(!url)('lifecycle and append-only triggers (needs Postgres at DAT
       for (const role of ['app', 'owner'] as const) {
         await tx(role, async () => {
           for (const [sql, params] of stmts) {
-            expect(await code(() => c.query(sql, params)), `${role}: ${sql}`).toBe('42501');
+            const got = await code(() => c.query(sql, params));
+            // TRUNCATE of audit_head_hashes is also refused earlier (0A000) because audit_head_timestamps
+            // references it (T-028); either way the statement fails.
+            const accepted = sql === 'TRUNCATE audit_head_hashes' ? ['42501', '0A000'] : ['42501'];
+            expect(accepted, `${role}: ${sql}`).toContain(got);
           }
         });
       }

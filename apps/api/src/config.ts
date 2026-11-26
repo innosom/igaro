@@ -38,6 +38,12 @@ export interface Config {
   logoMaxBytes: number;
   /** Largest accepted holder photo upload in bytes (PHOTO_MAX_BYTES, default 2 MB). */
   photoMaxBytes: number;
+  /**
+   * Public keys of the platform audit-head signer (T-028, ADR 0019), kid to raw base64url Ed25519 key, from
+   * AUDIT_HEAD_PUBLIC_KEYS="kid:key,kid2:key2". verify-chain checks head signatures against them; rotation
+   * keeps old entries. Empty = signatures are reported as unverified, not failed.
+   */
+  auditHeadPublicKeys: Record<string, string>;
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
@@ -202,6 +208,20 @@ function parseS3(env: Env, nodeEnv: string): S3Config | undefined {
   };
 }
 
+/** "kid:key,kid2:key2". Values are public keys (32 raw bytes, base64url); anything else is a startup error. */
+export function parseAuditHeadPublicKeys(raw: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || raw.trim() === '') return out;
+  for (const part of raw.split(',')) {
+    const [kid, key, extra] = part.trim().split(':');
+    if (!kid || !key || extra !== undefined || !/^[A-Za-z0-9_-]{1,64}$/.test(kid) || !/^[A-Za-z0-9_-]{43}$/.test(key)) {
+      throw new ConfigError('AUDIT_HEAD_PUBLIC_KEYS must be comma-separated kid:base64url-public-key pairs');
+    }
+    out[kid] = key;
+  }
+  return out;
+}
+
 export function loadConfig(env: Env = process.env): Config {
   const nodeEnv = env.NODE_ENV ?? 'development';
   if (nodeEnv !== 'development' && nodeEnv !== 'test' && nodeEnv !== 'production') {
@@ -315,11 +335,18 @@ export function loadConfig(env: Env = process.env): Config {
 
   const photoMaxBytes = parseCount(env.PHOTO_MAX_BYTES, 'PHOTO_MAX_BYTES', 2 * 1024 * 1024, 10 * 1024 * 1024);
 
+  const ipHashKey = parseIpHashKey(env.IP_HASH_KEY, nodeEnv);
+  const auditHeadPublicKeys = parseAuditHeadPublicKeys(env.AUDIT_HEAD_PUBLIC_KEYS);
+  if (nodeEnv === 'production' && Object.keys(auditHeadPublicKeys).length === 0) {
+    throw new ConfigError('AUDIT_HEAD_PUBLIC_KEYS is required in production');
+  }
+
   return {
     s3: parseS3(env, nodeEnv),
     logoMaxBytes,
     photoMaxBytes,
     accountMail,
+    auditHeadPublicKeys,
     session,
     tokenTtl,
     rateLimit,
@@ -329,7 +356,7 @@ export function loadConfig(env: Env = process.env): Config {
     logLevel: env.LOG_LEVEL ?? 'info',
     appDatabaseUrl: parseDbUrl(rawUrl, env),
     masterKey,
-    ipHashKey: parseIpHashKey(env.IP_HASH_KEY, nodeEnv),
+    ipHashKey,
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
     cookie: {
       name: env.COOKIE_NAME ?? 'igaro_session',

@@ -36,7 +36,7 @@ export interface BuildAppOptions {
     Partial<
       Pick<
         Config,
-        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'logoMaxBytes' | 'photoMaxBytes'
+        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'logoMaxBytes' | 'photoMaxBytes' | 'auditHeadPublicKeys'
       >
     >;
   db?: Db;
@@ -138,7 +138,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         const credentialOpts = { masterKey: opts.config.masterKey, hashIp: (ip: string | undefined) => hashIp(ip, ipHashKey) };
         registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log);
         registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log);
-        registerCredentialQueries(api, new CredentialQueryService(opts.db));
+        registerCredentialQueries(api, new CredentialQueryService(opts.db, opts.config.auditHeadPublicKeys ?? {}));
         registerHolders(api, {
           db: opts.db,
           storage: opts.storage,

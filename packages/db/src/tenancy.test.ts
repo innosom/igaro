@@ -101,14 +101,18 @@ describe.skipIf(!hasDatabase)('cross-tenant isolation on every table (needs Post
 
     it('control: the same statements succeed for the own tenant where the app role may insert', async () => {
       // institutions (platform only) and institution_keys (platform only) are refused for tenants by design.
-      const tenantInsertable = TENANT_TABLES.filter((t) => t !== 'institutions' && t !== 'institution_keys');
+      // audit_head_hashes is written only by the worker role (T-028, ADR 0019), never by igaro_app.
+      const tenantInsertable = TENANT_TABLES.filter(
+        (t) =>
+          t !== 'institutions' && t !== 'institution_keys' && t !== 'audit_head_hashes' && t !== 'audit_head_timestamps',
+      );
       for (const table of tenantInsertable) {
         await h.asTenant(h.A.institutionId, async (c) => {
           const { sql, params } = insertForTenant(table, h.A, h.uid());
           expect(await h.code(() => c.query(sql, params)), table).toBeUndefined();
         });
       }
-      for (const table of ['institutions', 'institution_keys'] as const) {
+      for (const table of ['institutions', 'institution_keys', 'audit_head_hashes', 'audit_head_timestamps'] as const) {
         await h.asTenant(h.A.institutionId, async (c) => {
           const { sql, params } = insertForTenant(table, h.A, h.uid());
           expect(await h.code(() => c.query(sql, params)), table).toBe('42501');

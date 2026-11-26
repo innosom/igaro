@@ -9,6 +9,17 @@ import {
 import { ACCOUNT_MAIL_QUEUE, InvalidAccountMailJobError } from './account-mail-job.js';
 import { ACCOUNT_MAIL_QUEUE_OPTIONS } from './account-mail-producer.js';
 import type { WorkerConfig } from './config.js';
+import pg from 'pg';
+import {
+  AUDIT_DAILY_HEAD_CRON,
+  AUDIT_DAILY_HEAD_QUEUE,
+  AUDIT_DAILY_HEAD_QUEUE_OPTIONS,
+  assertHeadInsertPrivilege,
+  headSignerFromEnvelope,
+  runAuditDailyHead,
+  type AuditHeadDeps,
+} from './audit-head.js';
+import { CalendarTimestamper, NoopTimestamper } from './ots.js';
 
 export interface WorkerHandle {
   boss: PgBoss;
@@ -22,6 +33,8 @@ export interface StartWorkerOptions {
   mail: AccountMailHandlerDeps;
   /** Seconds between polls for new jobs (default 2). Tests lower it. */
   pollingIntervalSeconds?: number;
+  /** audit.dailyHead (T-028). Omitted = the job is not registered. */
+  auditHead?: Omit<AuditHeadDeps, 'logger'> & { cron?: string };
 }
 
 export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandle> {
@@ -62,10 +75,30 @@ export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandl
   );
   logger.info({ queue: ACCOUNT_MAIL_QUEUE }, 'worker started');
 
+  if (opts.auditHead) {
+    const { cron, ...deps } = opts.auditHead;
+    // M2: fail loudly at startup if this login cannot write heads (e.g. APP_DATABASE_URL by mistake).
+    await assertHeadInsertPrivilege(deps.pool, deps.assumeRole);
+    await boss.createQueue(AUDIT_DAILY_HEAD_QUEUE, AUDIT_DAILY_HEAD_QUEUE_OPTIONS);
+    // pg-boss schedules are keyed per queue (one schedule, one tick per cron slot). A duplicate or manual
+    // run for the same UTC day is harmless: the job is idempotent per chain and day (unique constraint).
+    await boss.schedule(AUDIT_DAILY_HEAD_QUEUE, cron ?? AUDIT_DAILY_HEAD_CRON, {}, { tz: 'UTC' });
+    await boss.work(AUDIT_DAILY_HEAD_QUEUE, { batchSize: 1, pollingIntervalSeconds: opts.pollingIntervalSeconds ?? 2 }, async (jobs) => {
+      for (const job of jobs) {
+        const summary = await runAuditDailyHead({ ...deps, logger });
+        logger.info({ jobId: job.id, queue: AUDIT_DAILY_HEAD_QUEUE }, 'audit head job done');
+        // Fail (and retry with backoff) when any chain failed; completed chains are skipped next time.
+        if (summary.failures > 0) throw new Error(`audit head run had ${summary.failures} failure(s)`);
+      }
+    });
+    logger.info({ queue: AUDIT_DAILY_HEAD_QUEUE }, 'audit head job registered');
+  }
+
   return {
     boss,
     stop: async () => {
       await boss.stop({ graceful: true, timeout: 10000 });
+      await opts.auditHead?.pool.end();
       logger.info('worker stopped');
     },
   };
@@ -81,10 +114,25 @@ export function startWorkerFromConfig(config: WorkerConfig, logger: Logger): Pro
     connectionTimeout: 10000,
     socketTimeout: 20000,
   });
+  const ah = config.auditHead;
+  if (!ah) logger.warn('AUDIT_HEAD_SIGNING_KEY not set: audit.dailyHead is not registered');
   return startWorker({
     databaseUrl: config.databaseUrl,
     schema: config.pgbossSchema,
     logger,
     mail: { transport, from: config.smtp.from, webBaseUrl: config.webBaseUrl },
+    ...(ah
+      ? {
+          auditHead: {
+            pool: new pg.Pool({ connectionString: config.databaseUrl, max: 2 }),
+            signer: headSignerFromEnvelope(ah.keyEnvelope, ah.wrapKey, ah.kid),
+            timestamper:
+              config.otsCalendars.length > 0
+                ? new CalendarTimestamper({ calendars: config.otsCalendars })
+                : new NoopTimestamper(),
+            cron: ah.cron,
+          },
+        }
+      : {}),
   });
 }

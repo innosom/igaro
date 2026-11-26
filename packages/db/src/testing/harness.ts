@@ -39,6 +39,7 @@ export const TENANT_TABLES = [
   'verification_logs',
   'audit_logs',
   'audit_head_hashes',
+  'audit_head_timestamps',
   'import_batches',
   'import_rows',
 ] as const;
@@ -68,6 +69,7 @@ export interface TenantFixture {
   verificationLogId: string;
   auditLogId: string;
   headHashId: string;
+  headTimestampId: string;
   batchId: string;
   rowId: string;
   /** id of the seeded row in each tenant table */
@@ -100,6 +102,7 @@ function fixture(prefix: string, tag: string): TenantFixture {
     headHashId: mkId(prefix, 12),
     batchId: mkId(prefix, 13),
     rowId: mkId(prefix, 14),
+    headTimestampId: mkId(prefix, 15),
   };
   return {
     ...f,
@@ -117,6 +120,7 @@ function fixture(prefix: string, tag: string): TenantFixture {
       verification_logs: f.verificationLogId,
       audit_logs: f.auditLogId,
       audit_head_hashes: f.headHashId,
+      audit_head_timestamps: f.headTimestampId,
       import_batches: f.batchId,
       import_rows: f.rowId,
     },
@@ -147,6 +151,8 @@ export interface Harness {
   asAnonymous<T>(fn: (c: pg.Client) => Promise<T>): Promise<T>;
   /** The connecting role (usually superuser: bypasses RLS and grants, but not triggers). Rolled back. */
   asOwner<T>(fn: (c: pg.Client) => Promise<T>): Promise<T>;
+  /** Run fn as the igaro_worker role (T-028, ADR 0019) with the given RLS settings. Rolled back. */
+  asWorker<T>(settings: Record<string, string>, fn: (c: pg.Client) => Promise<T>): Promise<T>;
   asScope<T>(scope: Scope, fn: (c: pg.Client) => Promise<T>): Promise<T>;
   /** Run fn under a savepoint; returns the SQLSTATE of the error, or undefined if it succeeded. */
   code(fn: () => Promise<unknown>): Promise<string | undefined>;
@@ -199,7 +205,7 @@ export async function createHarness(prefix = 'h'): Promise<Harness> {
 
   async function scoped<T>(
     settings: Record<string, string>,
-    asAppRole: boolean,
+    role: 'igaro_app' | 'igaro_worker' | false,
     fn: (c: pg.Client) => Promise<T>,
   ): Promise<T> {
     await owner.query('BEGIN');
@@ -207,7 +213,7 @@ export async function createHarness(prefix = 'h'): Promise<Harness> {
       for (const [k, v] of Object.entries(settings)) {
         await owner.query('SELECT set_config($1, $2, true)', [k, v]);
       }
-      if (asAppRole) await owner.query('SET LOCAL ROLE igaro_app');
+      if (role) await owner.query(`SET LOCAL ROLE ${role}`);
       return await fn(owner);
     } finally {
       await owner.query('ROLLBACK');
@@ -220,10 +226,11 @@ export async function createHarness(prefix = 'h'): Promise<Harness> {
     A,
     B,
     appConnectionOptions: `-c search_path=${schema} -c role=igaro_app`,
-    asApp: (settings, fn) => scoped(settings, true, fn),
-    asTenant: (institutionId, fn) => scoped({ 'app.institution_id': institutionId }, true, fn),
-    asPlatform: (fn) => scoped({ 'app.is_platform_admin': 'true' }, true, fn),
-    asAnonymous: (fn) => scoped({}, true, fn),
+    asApp: (settings, fn) => scoped(settings, 'igaro_app', fn),
+    asWorker: (settings, fn) => scoped(settings, 'igaro_worker', fn),
+    asTenant: (institutionId, fn) => scoped({ 'app.institution_id': institutionId }, 'igaro_app', fn),
+    asPlatform: (fn) => scoped({ 'app.is_platform_admin': 'true' }, 'igaro_app', fn),
+    asAnonymous: (fn) => scoped({}, 'igaro_app', fn),
     // Settings keep statements valid for a non-superuser owner too; a superuser ignores them.
     asOwner: (fn) => scoped({ 'app.is_platform_admin': 'true', 'app.institution_id': A.institutionId }, false, fn),
     asScope(scope, fn) {
@@ -332,6 +339,10 @@ async function seed(c: pg.Client, tenants: TenantFixture[]): Promise<void> {
          VALUES ($1,$2,'2026-11-24',$3,'test-sig',$4)`,
         [f.headHashId, i, `test-head-${f.tag}`, f.kid],
       );
+      await c.query(
+        `INSERT INTO audit_head_timestamps (id, head_id, institution_id, state, ots_proof) VALUES ($1,$2,$3,'PENDING','\\x00')`,
+        [f.headTimestampId, f.headHashId, i],
+      );
       await c.query(`INSERT INTO import_batches (id, institution_id, filename) VALUES ($1,$2,'test.csv')`, [f.batchId, i]);
       await c.query(
         `INSERT INTO import_rows (id, institution_id, batch_id, row_number, data) VALUES ($1,$2,$3,1,'{}')`,
@@ -426,6 +437,12 @@ export function insertForTenant(
               VALUES ($1,$2,'2026-11-25','h','s',$3)`,
         params: [newId, t.institutionId, t.kid],
       };
+    case 'audit_head_timestamps':
+      return {
+        sql: `INSERT INTO audit_head_timestamps (id, head_id, institution_id, state, ots_proof)
+              VALUES ($1,$2,$3,'COMPLETE','\\x00')`,
+        params: [newId, t.headHashId, t.institutionId],
+      };
     case 'import_batches':
       return { sql: `INSERT INTO import_batches (id, institution_id) VALUES ($1,$2)`, params: [newId, t.institutionId] };
     case 'import_rows':
@@ -451,6 +468,7 @@ export const MUTABLE_ASSIGNMENT: Record<TenantTable, string | undefined> = {
   verification_logs: undefined,
   audit_logs: undefined,
   audit_head_hashes: undefined,
+  audit_head_timestamps: undefined,
   import_batches: `total_rows = 999`,
   import_rows: `error = 'pwned'`,
 };

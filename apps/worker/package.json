@@ -23,15 +23,17 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@igaro/core": "workspace:^",
     "nodemailer": "^10.6.1",
+    "pg": "^8.23.1",
     "pg-boss": "^12.39.0",
     "pino": "^9"
   },
   "devDependencies": {
+    "@igaro/db": "workspace:^",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/smtp-server": "^3.5.13",
-    "pg": "^8.23.1",
     "smtp-server": "^3.21.7"
   }
 }

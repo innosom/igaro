@@ -2,6 +2,7 @@
 // every query runs in Db.withTenant (RLS) and also filters on app_institution_id(). Foreign, unknown and malformed
 // ids are all the same 404. Responses never carry the verification token, the holder token (hash) or the salt: the
 // signed payload is therefore not returned whole, only its non-secret parts (attributes, dataHash, signature, kid).
+import { verifyAuditHeadSignature } from '@igaro/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AuthSession } from './auth.js';
 import { verifyAuditChain } from './audit.js';
@@ -158,7 +159,11 @@ const SELECT_SUMMARY = `
     JOIN credential_types t ON t.id = c.type_id AND t.institution_id = c.institution_id`;
 
 export class CredentialQueryService {
-  constructor(private readonly db: Db) {}
+  /** `headKeys`: platform audit-head public keys by kid (config AUDIT_HEAD_PUBLIC_KEYS). */
+  constructor(
+    private readonly db: Db,
+    private readonly headKeys: Readonly<Record<string, string>> = {},
+  ) {}
 
   async list(s: TenantSession, q: CredentialListQuery): Promise<{ items: CredentialSummary[]; nextCursor: string | null }> {
     const where = ['c.institution_id = app_institution_id()'];
@@ -268,10 +273,24 @@ export class CredentialQueryService {
     return this.db.withTenant(s, async (c) => {
       const chain = await verifyAuditChain(c, s.institutionId);
       const heads = (
-        await c.query<{ day: string; head_hash: string }>(
-          `SELECT day::text AS day, head_hash FROM audit_head_hashes WHERE institution_id = app_institution_id() ORDER BY day`,
+        await c.query<{ day: string; head_hash: string; signature: string; signer_kid: string }>(
+          `SELECT day::text AS day, head_hash, signature, signer_kid FROM audit_head_hashes
+            WHERE institution_id = app_institution_id() ORDER BY day`,
         )
       ).rows;
+      // Head signatures (T-028, ADR 0019): checked against the configured platform head public keys.
+      // A kid we hold no key for is "unverified" (not proof of tampering); a wrong signature is invalid.
+      const signatureInvalidDays: string[] = [];
+      const unverifiedDays: string[] = [];
+      for (const h of heads) {
+        const pub = this.headKeys[h.signer_kid];
+        if (!pub) unverifiedDays.push(h.day);
+        else if (
+          !verifyAuditHeadSignature({ institutionId: s.institutionId, day: h.day, headHash: h.head_hash }, h.signature, pub)
+        ) {
+          signatureInvalidDays.push(h.day);
+        }
+      }
       // A signed head must still be an entry hash of the chain. A rewritten or recomputed chain loses it.
       const found = new Set<string>();
       if (heads.length > 0) {
@@ -283,12 +302,22 @@ export class CredentialQueryService {
       }
       const mismatchedDays = heads.filter((h) => !found.has(h.head_hash)).map((h) => h.day);
       const headsRecorded = heads.length > 0 && mismatchedDays.length === 0;
+      // M1: once public keys are configured, a head signed under an unknown kid (forged or injected) is a failure.
+      const keysConfigured = Object.keys(this.headKeys).length > 0;
+      const unknownKid = keysConfigured && unverifiedDays.length > 0;
       return {
-        valid: chain.ok && mismatchedDays.length === 0,
+        valid: chain.ok && mismatchedDays.length === 0 && signatureInvalidDays.length === 0 && !unknownKid,
         entries: chain.count,
         ...(chain.ok ? { head: chain.head } : { brokenAtSeq: chain.brokenAtSeq, reason: chain.reason }),
-        headsRecorded,
-        signedHeads: { checked: heads.length, matched: heads.length - mismatchedDays.length, mismatchedDays },
+        headsRecorded: headsRecorded && signatureInvalidDays.length === 0 && !unknownKid,
+        signedHeads: {
+          checked: heads.length,
+          matched: heads.length - mismatchedDays.length,
+          mismatchedDays,
+          signaturesVerified: heads.length - unverifiedDays.length - signatureInvalidDays.length,
+          signatureInvalidDays,
+          signatureUnverifiedDays: unverifiedDays,
+        },
       };
     });
   }

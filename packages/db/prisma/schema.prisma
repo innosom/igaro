@@ -133,6 +133,7 @@ model Institution {
   verificationLogs VerificationLog[]
   auditLogs        AuditLog[]
   auditHeadHashes  AuditHeadHash[]
+  auditHeadTimestamps AuditHeadTimestamp[]
   importBatches    ImportBatch[]
 
   @@map("institutions")
@@ -411,11 +412,30 @@ model AuditHeadHash {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   institution Institution? @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  timestamps  AuditHeadTimestamp[]
 
   // NULLs are distinct in Postgres; platform-chain uniqueness is enforced in T-005 SQL.
   @@unique([institutionId, day])
   @@index([institutionId, createdAt])
   @@map("audit_head_hashes")
+}
+
+// OpenTimestamps proofs for a signed head (T-028, ADR 0019). Append-only: a PENDING calendar receipt
+// first, later one COMPLETE (upgraded) proof. audit_head_hashes.ots_proof is unused (that table is immutable).
+model AuditHeadTimestamp {
+  id            String   @id @default(uuid()) @db.Uuid
+  headId        String   @map("head_id") @db.Uuid
+  institutionId String?  @map("institution_id") @db.Uuid
+  state         String
+  otsProof      Bytes    @map("ots_proof")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  head        AuditHeadHash @relation(fields: [headId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  institution Institution?  @relation(fields: [institutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([headId, state])
+  @@index([institutionId])
+  @@map("audit_head_timestamps")
 }
 
 model ImportBatch {
