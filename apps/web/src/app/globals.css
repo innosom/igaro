@@ -13,3 +13,10 @@ body {
   outline: 3px solid #1d4ed8;
   outline-offset: 2px;
 }
+
+/* Verification page brand bar. Custom properties come from a nonce style tag with sanitised hex values. */
+.brand-bar {
+  background: var(--brand, #1e3a8a);
+  color: var(--brand-fg, #ffffff);
+  border-color: var(--brand-accent, #475569);
+}
