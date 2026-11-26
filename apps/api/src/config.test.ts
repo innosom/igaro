@@ -105,7 +105,7 @@ describe('loadConfig', () => {
     const pub = 'A'.repeat(43);
     expect(() => loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key })).toThrow(/AUDIT_HEAD_PUBLIC_KEYS is required/);
     expect(
-      loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key, AUDIT_HEAD_PUBLIC_KEYS: `k1:${pub}` }).cookie.secure,
+      loadConfig({ ...prod, MASTER_KEY: key, IP_HASH_KEY: key, AUDIT_HEAD_PUBLIC_KEYS: `k1:${pub}`, TRUST_PROXY: '1' }).cookie.secure,
     ).toBe(true);
   });
 
@@ -134,6 +134,19 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ ...good, SESSION_IDLE_MINUTES: '600', SESSION_MAX_HOURS: '1' }),
     ).toThrow(/must not exceed/);
+  });
+
+  it('requires an explicit non-false TRUST_PROXY in production', () => {
+    const prod = {
+      ...good,
+      NODE_ENV: 'production',
+      MASTER_KEY: key,
+      IP_HASH_KEY: key,
+      AUDIT_HEAD_PUBLIC_KEYS: `k1:${'A'.repeat(43)}`,
+    };
+    expect(() => loadConfig(prod)).toThrow(/TRUST_PROXY/);
+    expect(() => loadConfig({ ...prod, TRUST_PROXY: 'false' })).toThrow(/TRUST_PROXY/);
+    expect(loadConfig({ ...prod, TRUST_PROXY: '1' }).trustProxy).toBe(1);
   });
 
   it('parses TRUST_PROXY (ADR 0003) and refuses "true"', () => {

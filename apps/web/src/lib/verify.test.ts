@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   RESULTS,
@@ -7,6 +8,7 @@ import {
   clientIpFromXff,
   contrastRatio,
   parseTrustHops,
+  photoMatchesSignedHash,
   visitorIp,
   fetchVerification,
   parseVerifyResponse,
@@ -70,8 +72,20 @@ describe('state mapping', () => {
   });
   it('only shows holder fields that were returned, and scalar attributes only', () => {
     const d = parseVerifyResponse({ ...full, holder: { fullName: 'A' } })!;
-    expect(d.holder).toEqual({ fullName: 'A', idNumber: null, attributes: [], photoUrl: null });
+    expect(d.holder).toEqual({ fullName: 'A', idNumber: null, attributes: [], photoUrl: null, photoSha256: null });
     expect(parseVerifyResponse(full)!.holder!.attributes).toEqual([['gpa', '3.5']]);
+  });
+  it('accepts photo bytes only if they hash to the signed photoSha256', () => {
+    const bytes = new TextEncoder().encode('photo-bytes');
+    const sha = 'e0ef6c8d47ba2bcc1bd20ec7f7a3ac6ad4c3b8e6a2a7d1a5e1c0c4a0a5d5b5c1';
+    const real = createHash('sha256').update(bytes).digest('hex');
+    expect(photoMatchesSignedHash(bytes, real)).toBe(true);
+    expect(photoMatchesSignedHash(new TextEncoder().encode('other'), real)).toBe(false);
+    expect(photoMatchesSignedHash(bytes, 'f'.repeat(64))).toBe(false);
+    expect(photoMatchesSignedHash(bytes, null)).toBe(false);
+    expect(photoMatchesSignedHash(bytes, sha.toUpperCase())).toBe(false);
+    expect(parseVerifyResponse({ ...full, holder: { ...full.holder, photoSha256: real } })!.holder!.photoSha256).toBe(real);
+    expect(parseVerifyResponse({ ...full, holder: { ...full.holder, photoSha256: 'zz' } })!.holder!.photoSha256).toBeNull();
   });
   it('maps the warning code to text', () => {
     expect(warningText('INSTITUTION_SUSPENDED')).toMatch(/suspended/);

@@ -167,6 +167,29 @@ describe.skipIf(!url)('public verification (needs Postgres)', () => {
     expect((await result(c.verificationToken)).holder).toEqual({ fullName: 'Holder A' });
   });
 
+  it('builds the photo URL from the signed photoSha256 even if photo_key is swapped (tamper)', async () => {
+    const c = await issue('A');
+    await ownerQuery(`UPDATE institutions SET public_fields = $2::jsonb WHERE id = $1`, [INST.A, JSON.stringify(['photo'])]);
+    const swapped = `institutions/${INST.A}/holders/${HOLDER.A}/photo/${'e'.repeat(64)}.png`;
+    await ownerQuery(`UPDATE credential_holders SET photo_key = $2 WHERE id = $1`, [HOLDER.A, swapped]);
+    try {
+      const body = await result(c.verificationToken);
+      expect(body.result).toBe('VERIFIED');
+      expect(decodeURIComponent(decodeURIComponent(body.holder.photoUrl))).toContain(`/holders/${HOLDER.A}/photo/${PHOTO_SHA}.png`);
+      expect(body.holder.photoUrl).not.toContain('e'.repeat(64));
+      expect(body.holder.photoSha256).toBe(PHOTO_SHA);
+      // A hostile extension or path in the column is never copied into the key.
+      await ownerQuery(`UPDATE credential_holders SET photo_key = $2 WHERE id = $1`, [HOLDER.A, '../../x/other.html']);
+      expect((await result(c.verificationToken)).holder.photoUrl).toBeNull();
+    } finally {
+      await ownerQuery(`UPDATE credential_holders SET photo_key = $2 WHERE id = $1`, [
+        HOLDER.A,
+        `institutions/${INST.A}/holders/${HOLDER.A}/photo/${PHOTO_SHA}.png`,
+      ]);
+      await ownerQuery(`UPDATE institutions SET public_fields = '[]'::jsonb WHERE id = $1`, [INST.A]);
+    }
+  });
+
   it('NOT_FOUND for unknown, malformed and oversized tokens with one uniform shape', async () => {
     const real = await result((await issue('A')).verificationToken);
     const shapes = new Set<string>();

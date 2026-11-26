@@ -1,6 +1,7 @@
 // Public verification page logic (T-036, ADR 0026). Pure functions, no React, so it is unit-tested.
 // Never log a token or a response body from here.
 
+import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 
 export const RESULTS = [
@@ -31,6 +32,8 @@ export interface VerifyData {
     attributes: Array<[string, string]>;
     /** Present only if the API returned one. Never rendered directly: shown through the same-origin photo route. */
     photoUrl: string | null;
+    /** The SIGNED holder.photoSha256 (64 hex). The photo route refuses bytes that do not hash to it. */
+    photoSha256: string | null;
   } | null;
   type: { code: string; name: string; kind: string } | null;
   status: string | null;
@@ -119,6 +122,8 @@ export function parseVerifyResponse(body: unknown): VerifyData | null {
       idNumber: str(holder.idNumber, 200),
       attributes,
       photoUrl: str(holder.photoUrl, 2048),
+      photoSha256:
+        typeof holder.photoSha256 === 'string' && /^[0-9a-f]{64}$/.test(holder.photoSha256) ? holder.photoSha256 : null,
     },
     type: type
       ? { code: str(type.code, 100) ?? '', name: str(type.name, 200) ?? '', kind: str(type.kind, 100) ?? '' }
@@ -142,6 +147,12 @@ export interface FetchDeps {
   apiUrl?: string;
   /** Validated visitor IP, forwarded to the API as a single-value X-Forwarded-For. Omit if not derivable. */
   clientIp?: string | null;
+}
+
+/** True only if the bytes hash to the signed photo hash (lowercase hex SHA-256). */
+export function photoMatchesSignedHash(bytes: Uint8Array, signedSha256: string | null): boolean {
+  if (!signedSha256 || !/^[0-9a-f]{64}$/.test(signedSha256)) return false;
+  return createHash('sha256').update(bytes).digest('hex') === signedSha256;
 }
 
 /** WEB_TRUST_PROXY_HOPS: integer 0-10; anything else (unset, junk, out of range) is 0 = untrusted. */

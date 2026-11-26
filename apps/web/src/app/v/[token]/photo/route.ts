@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { fetchVerification, isPlausibleToken, visitorIp } from '../../../../lib/verify';
+import { fetchVerification, isPlausibleToken, photoMatchesSignedHash, visitorIp } from '../../../../lib/verify';
 
 // Same-origin photo proxy (ADR 0026): the API returns a short-lived signed storage URL on another origin, which the
 // strict CSP (img-src 'self') would block. The server re-checks the verification result, so the photo is shown only
@@ -62,6 +62,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ token: string }
     if (declared > MAX_BYTES) return NOT_FOUND();
     const buf = await readCapped(res, MAX_BYTES);
     if (!buf || buf.byteLength === 0) return NOT_FOUND();
+    // Fail closed: the bytes must be exactly the photo the institution signed.
+    if (!photoMatchesSignedHash(buf, d.holder?.photoSha256 ?? null)) return NOT_FOUND();
     return new Response(buf, {
       status: 200,
       headers: {
