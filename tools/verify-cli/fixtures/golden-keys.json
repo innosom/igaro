@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kid": "eau-2026-01",
+      "alg": "Ed25519",
+      "publicKey": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+      "status": "ACTIVE",
+      "createdAt": "2026-08-01T00:00:00.000Z",
+      "retiredAt": null
+    }
+  ]
+}
