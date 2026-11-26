@@ -9,10 +9,15 @@ const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   async rewrites() {
-    return [{ source: '/api/v1/:path*', destination: `${apiUrl}/api/v1/:path*` }];
+    return [
+      { source: '/api/v1/:path*', destination: `${apiUrl}/api/v1/:path*` },
+      // Public institution keys (ADR 0023, 0026), linked from the verification page.
+      { source: '/i/:slug/keys.json', destination: `${apiUrl}/i/:slug/keys.json` },
+    ];
   },
   async headers() {
     return [
+      { source: '/v/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
       {
         source: '/:path*',
         headers: [
