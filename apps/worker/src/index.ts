@@ -30,10 +30,13 @@ export {
 } from './ots.js';
 
 export * from './card-render-job.js';
+export * from './holder-delivery-job.js';
+export { PgBossHolderDeliveryQueue } from './holder-delivery-producer.js';
+export { runHolderDelivery, renderHolderMail, holderLink, type HolderDeliveryDeps } from './holder-delivery.js';
 export { runCardRender, ChromeCardRenderer, type CardRenderer, type CardRenderDeps } from './card-render.js';
 export { renderCardHtml, qrSvg, type CardModel } from './card-template.js';
 export { S3WorkerStorage, MemoryWorkerStorage, type WorkerObjectStorage } from './card-storage.js';
 
 // --- Slots for later tasks (not implemented here) ---
-// email.deliver (holder card mail), import.csv: later tasks. (audit.dailyHead: audit-head.ts, T-028; card.render: card-render.ts, T-039.)
+// import.csv: later task. (email.deliver: holder-delivery.ts, T-041.) (audit.dailyHead: audit-head.ts, T-028; card.render: card-render.ts, T-039.)
 // anchor.credential: Phase 1 only. It will read credential_events (the outbox); do NOT implement in the MVP.

@@ -6,7 +6,7 @@
 // Hashing, canonicalisation and signing come from @igaro/core (never reimplemented here). The private key is
 // unwrapped with the master key only inside the signing step and is never stored, returned or logged.
 // Tokens: the 128-bit verification token is stored in clear (QR/card need it); the holder token is stored only as
-// SHA-256 (ADR 0002) and its plaintext appears once, in the 201 response (the delivery job gets it later, T-040).
+// SHA-256 (ADR 0002) and its plaintext appears once, in the 201 response and, sealed, in the email.deliver job (T-041, ADR 0030).
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import type { PoolClient } from 'pg';
@@ -20,6 +20,7 @@ import {
 } from '@igaro/core';
 import { appendAudit } from './audit.js';
 import { enqueueCardAfterCommit } from './card-endpoints.js';
+import { enqueueDeliveryAfterCommit, type HolderDeliveryHook } from './holder-delivery.js';
 import type { CardRenderQueue } from './notifications.js';
 import type { AuthSession } from './auth.js';
 import { isUuid, type Db, type TenantSession } from './db.js';
@@ -344,6 +345,7 @@ export function registerCredentials(
   svc: CredentialService,
   log: FastifyBaseLogger,
   cardRender?: CardRenderQueue,
+  delivery?: HolderDeliveryHook,
 ): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
 
@@ -359,6 +361,8 @@ export function registerCredentials(
     );
     // After commit (svc.issue returned): queue the card render. Failure is logged and never fails issuance.
     await enqueueCardAfterCommit(cardRender, log, { institutionId: scope.institutionId, credentialId: out.id });
+    // Same rule for the holder email (T-041): the sealed token is queued only after commit; failure never fails issuance.
+    await enqueueDeliveryAfterCommit(delivery, log, scope, out);
     return reply.status(201).send(out);
   });
 }

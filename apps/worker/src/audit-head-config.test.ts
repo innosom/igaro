@@ -10,6 +10,8 @@ const base = {
   SMTP_HOST: '127.0.0.1',
   SMTP_FROM: 'no-reply@igaro.test',
   WEB_BASE_URL: 'http://127.0.0.1:3000',
+  // Required in production since T-041 (ADR 0030); harmless elsewhere.
+  DELIVERY_PAYLOAD_KEY: randomBytes(32).toString('base64'),
 };
 const wrap = randomBytes(32).toString('base64');
 const key = generateSigningKey(parseMasterKey(wrap));
