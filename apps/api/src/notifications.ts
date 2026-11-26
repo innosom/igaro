@@ -64,6 +64,28 @@ export class MemoryHolderDeliveryQueue implements HolderDeliveryQueue {
   }
 }
 
+/** Import batch jobs (T-043, ADR 0033). Ids only (institution and batch). Enqueued after the batch rows commit. */
+export interface ImportBatchQueue {
+  enqueue(job: { institutionId: string; batchId: string }): Promise<void>;
+}
+
+/** Drops every job (pg-boss not configured): the batch then stays PENDING. */
+export class NoopImportBatchQueue implements ImportBatchQueue {
+  async enqueue(): Promise<void> {
+    // intentionally empty
+  }
+}
+
+/** Records jobs in memory for tests; `fail` makes enqueue reject. */
+export class MemoryImportBatchQueue implements ImportBatchQueue {
+  readonly jobs: { institutionId: string; batchId: string }[] = [];
+  fail = false;
+  async enqueue(job: { institutionId: string; batchId: string }): Promise<void> {
+    if (this.fail) throw new Error('queue unavailable');
+    this.jobs.push({ institutionId: job.institutionId, batchId: job.batchId });
+  }
+}
+
 /** Records jobs in memory for tests. */
 export class MemoryAccountMailQueue implements AccountMailQueue {
   readonly jobs: AccountMailJob[] = [];

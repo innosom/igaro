@@ -112,7 +112,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: email.deliver job (sealed AES-256-GCM payload under DELIVERY_PAYLOAD_KEY, singleton key per credential, retry with backoff, job deleted on completion), enqueued by the API after issue/reissue commit (failure logged, never fails issuance), ADR 0030.
 - [x] T-042 [owner: igaro-web] [deps: T-033, T-040, T-035] Private holder page /h/:token (card and credential file download)
   - Done: holder-token card.png/pdf endpoints (ADR 0031), /h/:token page and card proxy (ADR 0032); review ship, 0 Critical/High, M1/M2 fixed. Web typecheck/lint/tests were not run after the M1/M2 fix (npm blocked in session). Stray empty dir apps/web/src/app/h/[token]/card.[ext] needs deleting.
-- [ ] T-043 [owner: igaro-api] [deps: T-025, T-011] POST /credentials/import: CSV + photo ZIP validate/preview and batch job creation
+- [x] T-043 [owner: igaro-api] [deps: T-025, T-011] POST /credentials/import: CSV + photo ZIP validate/preview and batch job creation
+  - Done: POST/GET /credentials/import (dry-run preview, all-or-nothing validation, own CSV/ZIP parsers, ids-only import.batch job), ADR 0033; api 474 + worker 116 tests pass; review ship, 0 Critical/High. Follow-ups: T-044 worker must re-run ZIP/JPEG checks, strip EXIF, verify source hashes, delete sources after finish/fail (M2, L5); API: per-part CSV limit, concurrency cap, off-event-loop inflate (M1), email formula check (L1), pre-upload active-batch check (L2), 503 on noop queue (L3).
 - [ ] T-044 [owner: igaro-worker] [deps: T-043, T-041] CSV + ZIP import batch job (500 holders with photos, issue, email each)
 - [ ] T-045 [owner: igaro-web] [deps: T-027, T-035, T-016, T-017] Dashboard: branding, keys, holders, types, issue form, lifecycle actions, credential list, status counts, audit view
 - [ ] T-046 [owner: igaro-web] [deps: T-043, T-015, T-045] CSV import preview UI and platform-admin screens

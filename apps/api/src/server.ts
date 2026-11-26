@@ -6,9 +6,11 @@ import {
   NoopAccountMailQueue,
   NoopCardRenderQueue,
   NoopHolderDeliveryQueue,
+  NoopImportBatchQueue,
   type AccountMailQueue,
   type CardRenderQueue,
   type HolderDeliveryQueue,
+  type ImportBatchQueue,
 } from './notifications.js';
 
 const config = loadConfig();
@@ -18,6 +20,7 @@ const db = new Db({ connectionString: config.appDatabaseUrl });
 let accountMail: AccountMailQueue = new NoopAccountMailQueue();
 let cardRender: CardRenderQueue = new NoopCardRenderQueue();
 let holderDelivery: HolderDeliveryQueue = new NoopHolderDeliveryQueue();
+let importBatch: ImportBatchQueue = new NoopImportBatchQueue();
 let stopQueue: (() => Promise<void>) | undefined;
 if (config.accountMail.driver === 'pgboss') {
   // Lazy: needs the worker package built (`pnpm --filter @igaro/worker build`; `pnpm -r build` orders it).
@@ -30,13 +33,14 @@ if (config.accountMail.driver === 'pgboss') {
   });
   accountMail = q.accountMail;
   cardRender = q.cardRender;
+  importBatch = q.importBatch;
   // Without DELIVERY_PAYLOAD_KEY (allowed outside production) no holder email is queued.
   if (q.holderDelivery) holderDelivery = q.holderDelivery;
   stopQueue = q.stop;
 }
 
 const storage = config.s3 ? new S3ObjectStorage(config.s3) : undefined;
-const app = await buildApp({ config, db, accountMail, cardRender, holderDelivery, storage });
+const app = await buildApp({ config, db, accountMail, cardRender, holderDelivery, importBatch, storage });
 app.addHook('onClose', async () => {
   await stopQueue?.();
   await db.close();
