@@ -29,6 +29,12 @@ import {
   InvalidHolderDeliveryJobError,
 } from './holder-delivery-job.js';
 import { runHolderDelivery, type HolderDeliveryDeps } from './holder-delivery.js';
+import {
+  IMPORT_BATCH_QUEUE,
+  IMPORT_BATCH_QUEUE_OPTIONS,
+  InvalidImportBatchJobError,
+} from './import-batch-job.js';
+import { failImportBatch, HttpImportApi, runImportBatch, type ImportBatchDeps } from './import-batch.js';
 
 export interface WorkerHandle {
   boss: PgBoss;
@@ -48,6 +54,8 @@ export interface StartWorkerOptions {
   cardRender?: Omit<CardRenderDeps, 'logger'>;
   /** email.deliver (T-041, ADR 0030). Uses `mail` for transport, sender and web URL. Omitted = the job is not registered. */
   holderDelivery?: Pick<HolderDeliveryDeps, 'pool' | 'key' | 'assumeRole'>;
+  /** import.batch (T-044, ADR 0034). Omitted = the job is not registered. */
+  importBatch?: Omit<ImportBatchDeps, 'logger'>;
 }
 
 export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandle> {
@@ -160,6 +168,32 @@ export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandl
     logger.info({ queue: HOLDER_DELIVERY_QUEUE }, 'holder delivery job registered');
   }
 
+  if (opts.importBatch) {
+    const deps: ImportBatchDeps = { ...opts.importBatch, logger };
+    await boss.createQueue(IMPORT_BATCH_QUEUE, IMPORT_BATCH_QUEUE_OPTIONS);
+    // One batch at a time: each issuance is signed by the API and every row is serial by design (ADR 0034).
+    await boss.work(IMPORT_BATCH_QUEUE, { batchSize: 1, includeMetadata: true, pollingIntervalSeconds: opts.pollingIntervalSeconds ?? 2 }, async (jobs) => {
+      for (const job of jobs) {
+        try {
+          const outcome = await runImportBatch(deps, job.data);
+          logger.info({ jobId: job.id, queue: IMPORT_BATCH_QUEUE, outcome }, 'import batch job done');
+        } catch (err) {
+          if (err instanceof InvalidImportBatchJobError) {
+            logger.error({ jobId: job.id, queue: IMPORT_BATCH_QUEUE }, 'invalid job dropped');
+            continue;
+          }
+          if (job.retryCount >= job.retryLimit) {
+            // Last attempt: record the batch as FAILED so the admin sees it, then let pg-boss mark the job failed.
+            await failImportBatch(deps, job.data).catch(() => logger.error({ jobId: job.id, queue: IMPORT_BATCH_QUEUE }, 'could not mark import batch failed'));
+          }
+          logger.warn({ jobId: job.id, queue: IMPORT_BATCH_QUEUE, retryCount: job.retryCount, err }, 'import batch job failed');
+          throw err;
+        }
+      }
+    });
+    logger.info({ queue: IMPORT_BATCH_QUEUE }, 'import batch job registered');
+  }
+
   return {
     boss,
     stop: async () => {
@@ -188,12 +222,17 @@ export function startWorkerFromConfig(config: WorkerConfig, logger: Logger): Pro
   if (!cr) logger.warn('S3_* or CHROME_PATH not set: card.render is not registered');
   const hd = config.holderDelivery;
   if (!hd) logger.warn('DELIVERY_PAYLOAD_KEY not set: email.deliver is not registered');
+  const ib = config.importBatch;
+  if (!ib) logger.warn('INTERNAL_API_URL/INTERNAL_API_TOKEN or S3_* not set: import.batch is not registered');
   return startWorker({
     databaseUrl: config.databaseUrl,
     schema: config.pgbossSchema,
     logger,
     mail: { transport, from: config.smtp.from, webBaseUrl: config.webBaseUrl },
     ...(hd ? { holderDelivery: { pool: new pg.Pool({ connectionString: config.databaseUrl, max: 2 }), key: hd.key } } : {}),
+    ...(ib
+      ? { importBatch: { api: new HttpImportApi({ baseUrl: ib.apiUrl, token: ib.token }), storage: new S3WorkerStorage(ib.s3) } }
+      : {}),
     ...(cr
       ? {
           cardRender: {

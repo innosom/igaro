@@ -60,6 +60,13 @@ export interface WorkerConfig {
    * holder token and address in the job (same value as the API's DELIVERY_PAYLOAD_KEY); it is not MASTER_KEY.
    */
   holderDelivery: { key: Buffer } | undefined;
+  /**
+   * import.batch (T-044, ADR 0034). `undefined` = job not registered. Needs private storage (S3_*, to read the uploaded
+   * photo ZIP and delete the sources) and the API's internal import endpoints: INTERNAL_API_URL (the API's /api/v1 base,
+   * e.g. http://api:3001/api/v1) and INTERNAL_API_TOKEN (same value as the API's, 32-512 characters). The worker needs
+   * no database grant for imports: all writes go through the API, the only component that signs.
+   */
+  importBatch: { s3: S3Config; apiUrl: string; token: string } | undefined;
 }
 
 type Env = Record<string, string | undefined>;
@@ -147,7 +154,33 @@ export function loadWorkerConfig(env: Env = process.env): WorkerConfig {
     otsCalendars: parseOtsCalendars(env, nodeEnv),
     cardRender: parseCardRender(env, nodeEnv),
     holderDelivery: parseHolderDelivery(env, nodeEnv),
+    importBatch: parseImportBatch(env, nodeEnv),
   };
+}
+
+function parseImportBatch(env: Env, nodeEnv: string): WorkerConfig['importBatch'] {
+  const rawUrl = env.INTERNAL_API_URL;
+  const token = env.INTERNAL_API_TOKEN;
+  if (!rawUrl && !token) return undefined;
+  if (!rawUrl || !token) throw new ConfigError('INTERNAL_API_URL and INTERNAL_API_TOKEN must be set together');
+  if (PLACEHOLDER.test(token)) throw new ConfigError('INTERNAL_API_TOKEN looks like a placeholder');
+  if (token.length < 32 || token.length > 512 || /\s/.test(token)) {
+    throw new ConfigError('INTERNAL_API_TOKEN must be 32-512 characters without whitespace');
+  }
+  let u: URL;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    throw new ConfigError('INTERNAL_API_URL is not a valid URL');
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new ConfigError('INTERNAL_API_URL must be http(s)');
+  if (u.username || u.password || u.search || u.hash) {
+    throw new ConfigError('INTERNAL_API_URL must not contain credentials, query or fragment');
+  }
+  const s3 = parseS3(env, nodeEnv);
+  // Without private storage the photo archive cannot be read: the job is not registered (startup warning).
+  if (!s3) return undefined;
+  return { s3, apiUrl: `${u.origin}${u.pathname.replace(/\/+$/, '')}`, token };
 }
 
 function parseHolderDelivery(env: Env, nodeEnv: string): WorkerConfig['holderDelivery'] {

@@ -49,6 +49,11 @@ export interface Config {
    * email.deliver job. Same value as the worker's. Not MASTER_KEY. Undefined = no holder delivery email is queued.
    */
   deliveryPayloadKey?: Buffer | undefined;
+  /**
+   * INTERNAL_API_TOKEN (T-044, ADR 0034): shared secret the import worker presents as a Bearer token on the internal
+   * import endpoints. 32-512 characters. Unset = those endpoints are not registered. Never logged.
+   */
+  internalApiToken?: string | undefined;
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
@@ -367,6 +372,17 @@ export function loadConfig(env: Env = process.env): Config {
     throw new ConfigError('DELIVERY_PAYLOAD_KEY is required in production when ACCOUNT_MAIL_QUEUE=pgboss');
   }
 
+  const internalRaw = env.INTERNAL_API_TOKEN;
+  let internalApiToken: string | undefined;
+  if (internalRaw !== undefined && internalRaw !== '') {
+    if (PLACEHOLDER.test(internalRaw)) throw new ConfigError('INTERNAL_API_TOKEN looks like a placeholder');
+    if (internalRaw.length < 32 || internalRaw.length > 512 || /\s/.test(internalRaw)) {
+      throw new ConfigError('INTERNAL_API_TOKEN must be 32-512 characters without whitespace');
+    }
+    if (env.MASTER_KEY && env.MASTER_KEY.trim() === internalRaw) throw new ConfigError('INTERNAL_API_TOKEN must differ from MASTER_KEY');
+    internalApiToken = internalRaw;
+  }
+
   const logoMaxBytes = parseCount(env.LOGO_MAX_BYTES, 'LOGO_MAX_BYTES', 1024 * 1024, 10 * 1024 * 1024);
 
   const photoMaxBytes = parseCount(env.PHOTO_MAX_BYTES, 'PHOTO_MAX_BYTES', 2 * 1024 * 1024, 10 * 1024 * 1024);
@@ -390,6 +406,7 @@ export function loadConfig(env: Env = process.env): Config {
     photoMaxBytes,
     accountMail,
     deliveryPayloadKey,
+    internalApiToken,
     auditHeadPublicKeys,
     session,
     tokenTtl,

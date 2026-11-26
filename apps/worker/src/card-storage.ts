@@ -8,6 +8,8 @@ export interface WorkerObjectStorage {
   /** Returns null when the object does not exist. */
   get(key: string, maxBytes: number): Promise<Buffer | null>;
   put(key: string, body: Buffer, contentType: string): Promise<void>;
+  /** Remove an object (a missing object is not an error). Used to drop import sources after a batch finishes. */
+  delete(key: string): Promise<void>;
 }
 
 export class StorageError extends Error {
@@ -27,6 +29,10 @@ export class MemoryWorkerStorage implements WorkerObjectStorage {
   }
   put(key: string, body: Buffer, contentType: string): Promise<void> {
     this.objects.set(key, { body: Buffer.from(body), contentType });
+    return Promise.resolve();
+  }
+  delete(key: string): Promise<void> {
+    this.objects.delete(key);
     return Promise.resolve();
   }
 }
@@ -55,7 +61,7 @@ export class S3WorkerStorage implements WorkerObjectStorage {
     this.base = new URL(cfg.endpoint);
   }
 
-  private async send(method: 'GET' | 'PUT', key: string, body?: Buffer, contentType?: string): Promise<Response> {
+  private async send(method: 'GET' | 'PUT' | 'DELETE', key: string, body?: Buffer, contentType?: string): Promise<Response> {
     const path0 = this.cfg.forcePathStyle ? `/${enc(this.cfg.bucket)}/${encPath(key)}` : `/${encPath(key)}`;
     const u = new URL(this.base.origin);
     if (!this.cfg.forcePathStyle) u.hostname = `${this.cfg.bucket}.${this.base.hostname}`;
@@ -110,5 +116,11 @@ export class S3WorkerStorage implements WorkerObjectStorage {
     const res = await this.send('PUT', key, body, contentType);
     await res.arrayBuffer().catch(() => undefined);
     if (!res.ok) throw new StorageError();
+  }
+
+  async delete(key: string): Promise<void> {
+    const res = await this.send('DELETE', key);
+    await res.arrayBuffer().catch(() => undefined);
+    if (!res.ok && res.status !== 404) throw new StorageError();
   }
 }
