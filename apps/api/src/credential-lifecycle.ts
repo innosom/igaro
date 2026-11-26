@@ -8,6 +8,8 @@ import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
 import { LifecycleError, planTransition, type CredentialStatus, type LifecycleAction } from '@igaro/core';
 import { appendAudit } from './audit.js';
+import { enqueueCardAfterCommit } from './card-endpoints.js';
+import type { CardRenderQueue } from './notifications.js';
 import type { AuthSession } from './auth.js';
 import {
   BAD_TEXT_RE,
@@ -260,7 +262,12 @@ const tenantScope = (s: AuthSession | null): TenantSession => {
   return { kind: 'tenant', userId: s.userId, institutionId: s.institutionId };
 };
 
-export function registerCredentialLifecycle(app: FastifyInstance, svc: CredentialLifecycleService, log: FastifyBaseLogger): void {
+export function registerCredentialLifecycle(
+  app: FastifyInstance,
+  svc: CredentialLifecycleService,
+  log: FastifyBaseLogger,
+  cardRender?: CardRenderQueue,
+): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
   type P = { Params: { id: string } };
 
@@ -287,6 +294,8 @@ export function registerCredentialLifecycle(app: FastifyInstance, svc: Credentia
       { event: 'credential.reissued', actorId: scope.userId, institutionId: scope.institutionId, credentialId: req.params.id, newCredentialId: out.credential.id },
       'credential reissued',
     );
+    // After commit: render the NEW credential's card. Failure is logged and never fails the reissue.
+    await enqueueCardAfterCommit(cardRender, log, { institutionId: scope.institutionId, credentialId: out.credential.id });
     return reply.status(201).send(out);
   });
 }
