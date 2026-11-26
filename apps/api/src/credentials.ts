@@ -19,6 +19,8 @@ import {
   type CredentialPayloadV1,
 } from '@igaro/core';
 import { appendAudit } from './audit.js';
+import { enqueueCardAfterCommit } from './card-endpoints.js';
+import type { CardRenderQueue } from './notifications.js';
 import type { AuthSession } from './auth.js';
 import { isUuid, type Db, type TenantSession } from './db.js';
 import { AppError, NotFoundError } from './errors.js';
@@ -337,7 +339,12 @@ const tenantScope = (req: FastifyRequest): TenantSession => {
   return { kind: 'tenant', userId: s.userId, institutionId: s.institutionId };
 };
 
-export function registerCredentials(app: FastifyInstance, svc: CredentialService, log: FastifyBaseLogger): void {
+export function registerCredentials(
+  app: FastifyInstance,
+  svc: CredentialService,
+  log: FastifyBaseLogger,
+  cardRender?: CardRenderQueue,
+): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
 
   app.post('/credentials', ia, async (req, reply) => {
@@ -350,6 +357,8 @@ export function registerCredentials(app: FastifyInstance, svc: CredentialService
       { event: 'credential.issued', actorId: scope.userId, institutionId: scope.institutionId, credentialId: out.id },
       'credential issued',
     );
+    // After commit (svc.issue returned): queue the card render. Failure is logged and never fails issuance.
+    await enqueueCardAfterCommit(cardRender, log, { institutionId: scope.institutionId, credentialId: out.id });
     return reply.status(201).send(out);
   });
 }

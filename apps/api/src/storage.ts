@@ -10,6 +10,8 @@ export interface ObjectStorage {
   delete(key: string): Promise<void>;
   /** Short-lived GET URL for a private object. */
   signedGetUrl(key: string, expiresSeconds: number): Promise<string>;
+  /** True when the object exists (HEAD). Throws StorageError on any failure other than "not found". */
+  exists(key: string): Promise<boolean>;
 }
 
 export class StorageError extends Error {
@@ -23,6 +25,7 @@ export class StorageError extends Error {
 export class MemoryObjectStorage implements ObjectStorage {
   readonly objects = new Map<string, { body: Buffer; contentType: string }>();
   failPut = false;
+  failExists = false;
 
   put(key: string, body: Buffer, contentType: string): Promise<void> {
     if (this.failPut) return Promise.reject(new StorageError());
@@ -32,6 +35,10 @@ export class MemoryObjectStorage implements ObjectStorage {
   delete(key: string): Promise<void> {
     this.objects.delete(key);
     return Promise.resolve();
+  }
+  exists(key: string): Promise<boolean> {
+    if (this.failExists) return Promise.reject(new StorageError());
+    return Promise.resolve(this.objects.has(key));
   }
   signedGetUrl(key: string, expiresSeconds: number): Promise<string> {
     return Promise.resolve(`memory://${encodeURIComponent(key)}?expires=${expiresSeconds}`);
@@ -85,11 +92,11 @@ export class S3ObjectStorage implements ObjectStorage {
   }
 
   private async send(
-    method: 'PUT' | 'DELETE',
+    method: 'PUT' | 'DELETE' | 'HEAD',
     key: string,
     body: Buffer | undefined,
     contentType?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { url, host, path } = this.target(key);
     const { amz, date } = this.stamp();
     const payloadHash = hex(body ?? '');
@@ -124,19 +131,22 @@ export class S3ObjectStorage implements ObjectStorage {
     } catch {
       throw new StorageError(); // never echo the URL, headers or underlying error
     }
-    if (!res.ok) {
-      await res.arrayBuffer().catch(() => undefined);
-      throw new StorageError();
-    }
     await res.arrayBuffer().catch(() => undefined);
+    if (method === 'HEAD' && res.status === 404) return false;
+    if (!res.ok) throw new StorageError();
+    return true;
   }
 
   put(key: string, body: Buffer, contentType: string): Promise<void> {
-    return this.send('PUT', key, body, contentType);
+    return this.send('PUT', key, body, contentType).then(() => undefined);
   }
 
   delete(key: string): Promise<void> {
-    return this.send('DELETE', key, undefined);
+    return this.send('DELETE', key, undefined).then(() => undefined);
+  }
+
+  exists(key: string): Promise<boolean> {
+    return this.send('HEAD', key, undefined);
   }
 
   signedGetUrl(key: string, expiresSeconds: number): Promise<string> {

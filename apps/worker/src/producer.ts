@@ -2,6 +2,12 @@
 export * from './account-mail-job.js';
 export * from './card-render-job.js';
 export {
+  PgBossCardRenderQueue,
+  connectProducerQueues,
+  type CardRenderQueue,
+  type ConnectedProducerQueues,
+} from './card-render-producer.js';
+export {
   PgBossAccountMailQueue,
   connectAccountMailQueue,
   retentionFor,

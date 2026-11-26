@@ -5,7 +5,8 @@ import { AccountService } from './account.js';
 import { DEFAULT_RATE_LIMIT, type Config } from './config.js';
 import type { Db } from './db.js';
 import { AppError, RateLimitedError } from './errors.js';
-import type { AccountMailQueue } from './notifications.js';
+import type { AccountMailQueue, CardRenderQueue } from './notifications.js';
+import { registerCardEndpoints } from './card-endpoints.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
 import { InstitutionService, registerInstitutions } from './institutions.js';
@@ -44,6 +45,8 @@ export interface BuildAppOptions {
   db?: Db;
   /** Where invite/reset mail jobs go. Defaults to a no-op until the worker queue exists (T-011). */
   accountMail?: AccountMailQueue;
+  /** Where card.render jobs go after issuance/reissue commit (ids only). Without it nothing is queued. */
+  cardRender?: CardRenderQueue;
   /** Private object storage for logos. Without it POST /institution/logo answers 503. */
   storage?: ObjectStorage;
   /** Per-institution limit for key rotation and compromise (default 10 per hour). */
@@ -155,8 +158,9 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         });
         registerCredentialTypes(api, { db: opts.db, log: app.log, hashIp: (ip) => hashIp(ip, ipHashKey) });
         const credentialOpts = { masterKey: opts.config.masterKey, hashIp: (ip: string | undefined) => hashIp(ip, ipHashKey) };
-        registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log);
-        registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log);
+        registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log, opts.cardRender);
+        registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log, opts.cardRender);
+        registerCardEndpoints(api, { db: opts.db, storage: opts.storage, log: app.log });
         registerCredentialQueries(api, new CredentialQueryService(opts.db, opts.config.auditHeadPublicKeys ?? {}));
         registerVerify(
           api,

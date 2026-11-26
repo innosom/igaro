@@ -61,7 +61,7 @@ Editing attributes never changes issued credentials: each signed payload carries
 | POST /credentials/:id/revoke | `{reason}` required; terminal; ACTIVE only |
 | POST /credentials/:id/reissue | `{reason, attributes?, expiresAt?}` (omitted fields inherited); 201 `{credential, previous}`; ACTIVE old -> SUPERSEDED, REVOKED old stays REVOKED and the new one links to it (`ALREADY_REISSUED` 409 on repeat) |
 | POST /credentials/import | multipart CSV + ZIP; `?dryRun=true` returns preview; otherwise creates batch job (202) |
-| GET /credentials/:id/card.png, card.pdf | rendered card |
+| GET /credentials/:id/card.png, card.pdf | INSTITUTION_ADMIN. Only for an ACTIVE, unexpired credential whose stored hash and signature re-verify (core). `302` to a signed URL valid 60 s, `Cache-Control: no-store`. `404 NOT_FOUND` for unknown, foreign, malformed, non-ACTIVE, expired or integrity-failed; `404 CARD_NOT_READY` + `Retry-After` while the worker has not rendered it; `503 STORAGE_UNAVAILABLE` without storage (ADR 0029) |
 Illegal transitions return 409. Idempotency-Key header supported on issue.
 
 ## Dashboard and audit (IA)

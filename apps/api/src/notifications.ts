@@ -17,6 +17,28 @@ export class NoopAccountMailQueue implements AccountMailQueue {
   }
 }
 
+/** Card render jobs (T-040, ADR 0029). Ids only. Enqueued after the issuing transaction commits. */
+export interface CardRenderQueue {
+  enqueue(job: { institutionId: string; credentialId: string }): Promise<void>;
+}
+
+/** Drops every job (pg-boss not configured). Cards then simply do not exist and the endpoints answer CARD_NOT_READY. */
+export class NoopCardRenderQueue implements CardRenderQueue {
+  async enqueue(): Promise<void> {
+    // intentionally empty
+  }
+}
+
+/** Records jobs in memory for tests; `fail` makes enqueue reject. */
+export class MemoryCardRenderQueue implements CardRenderQueue {
+  readonly jobs: { institutionId: string; credentialId: string }[] = [];
+  fail = false;
+  async enqueue(job: { institutionId: string; credentialId: string }): Promise<void> {
+    if (this.fail) throw new Error('queue unavailable');
+    this.jobs.push({ institutionId: job.institutionId, credentialId: job.credentialId });
+  }
+}
+
 /** Records jobs in memory for tests. */
 export class MemoryAccountMailQueue implements AccountMailQueue {
   readonly jobs: AccountMailJob[] = [];
