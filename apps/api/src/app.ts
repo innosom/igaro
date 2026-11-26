@@ -17,6 +17,7 @@ import { CredentialLifecycleService, registerCredentialLifecycle } from './crede
 import { CredentialQueryService, registerCredentialQueries } from './credential-queries.js';
 import { DEFAULT_PHOTO_MAX_BYTES, registerHolders } from './holders.js';
 import type { ObjectStorage } from './storage.js';
+import { VerifyService, registerVerify } from './verify.js';
 import { hashIp, loggerOptions } from './logging.js';
 
 // Safe defaults when a caller (tests) does not pass cookie/session config: Secure cookie, 1 h idle, 12 h max.
@@ -73,6 +74,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     logger: opts.logStream ? { ...base, stream: opts.logStream } : base,
     trustProxy: fastifyTrustProxy(opts.config.trustProxy ?? false),
     bodyLimit: 1024 * 1024,
+    routerOptions: { maxParamLength: 1024 }, // so over-long verification tokens reach the handler as a normal NOT_FOUND
   });
   app.decorate('db', opts.db);
 
@@ -149,6 +151,16 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         registerCredentials(api, new CredentialService(opts.db, credentialOpts), app.log);
         registerCredentialLifecycle(api, new CredentialLifecycleService(opts.db, credentialOpts), app.log);
         registerCredentialQueries(api, new CredentialQueryService(opts.db, opts.config.auditHeadPublicKeys ?? {}));
+        registerVerify(
+          api,
+          new VerifyService({
+            db: opts.db,
+            storage: opts.storage,
+            log: app.log,
+            hashIp: (ip) => hashIp(ip, ipHashKey),
+            rateLimit: opts.config.rateLimit?.verify,
+          }),
+        );
         registerHolders(api, {
           db: opts.db,
           storage: opts.storage,

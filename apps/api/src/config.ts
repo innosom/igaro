@@ -58,6 +58,8 @@ export interface RateLimitConfig {
   reset: { ipMax: number; accountMax: number; windowSeconds: number };
   /** Invite accept and reset confirm (token endpoints): per IP. */
   token: { ipMax: number; windowSeconds: number };
+  /** Public verification (T-032, ADR 0022): per IP and per token. Optional so older callers keep working; defaults apply. */
+  verify?: { ipMax: number; tokenMax: number; windowSeconds: number };
 }
 
 export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
@@ -65,6 +67,8 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   reset: { ipMax: 10, accountMax: 3, windowSeconds: 3600 },
   token: { ipMax: 20, windowSeconds: 900 },
 };
+
+export const DEFAULT_VERIFY_LIMIT = { ipMax: 60, tokenMax: 120, windowSeconds: 60 };
 
 export const DEFAULT_TOKEN_TTL = { inviteSeconds: 72 * 3600, resetSeconds: 3600 };
 
@@ -294,6 +298,16 @@ export function loadConfig(env: Env = process.env): Config {
         env.RATE_LIMIT_TOKEN_WINDOW_SECONDS,
         'RATE_LIMIT_TOKEN_WINDOW_SECONDS',
         d.token.windowSeconds,
+        86400,
+      ),
+    },
+    verify: {
+      ipMax: parseCount(env.RATE_LIMIT_VERIFY_IP_MAX, 'RATE_LIMIT_VERIFY_IP_MAX', DEFAULT_VERIFY_LIMIT.ipMax),
+      tokenMax: parseCount(env.RATE_LIMIT_VERIFY_TOKEN_MAX, 'RATE_LIMIT_VERIFY_TOKEN_MAX', DEFAULT_VERIFY_LIMIT.tokenMax),
+      windowSeconds: parseCount(
+        env.RATE_LIMIT_VERIFY_WINDOW_SECONDS,
+        'RATE_LIMIT_VERIFY_WINDOW_SECONDS',
+        DEFAULT_VERIFY_LIMIT.windowSeconds,
         86400,
       ),
     },
