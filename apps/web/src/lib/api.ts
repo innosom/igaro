@@ -12,6 +12,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Parsed JSON error body (e.g. the `preview` of a 422 import). Never logged. */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -121,7 +123,7 @@ export function toApiError(status: number, data: unknown): ApiError {
   const e = (data as { error?: { code?: unknown; message?: unknown } } | undefined)?.error;
   const code = typeof e?.code === 'string' ? e.code : 'UNKNOWN';
   const message = typeof e?.message === 'string' && e.message ? e.message : GENERIC;
-  return new ApiError(status, code, message);
+  return new ApiError(status, code, message, data);
 }
 
 /** User-facing text for an error. Uses the API message, with friendlier wording for common codes. */
@@ -130,6 +132,10 @@ export function describeError(err: unknown): string {
   switch (err.code) {
     case 'RATE_LIMITED':
       return 'Too many attempts. Please wait a few minutes and try again.';
+    case 'FORBIDDEN':
+      return 'Your account is not allowed to use this area.';
+    case 'PAYLOAD_TOO_LARGE':
+      return 'The file is too large. Reduce its size and try again.';
     case 'INVALID_TOKEN':
       return 'This link is invalid or has expired. Ask for a new one.';
     case 'NETWORK_ERROR':

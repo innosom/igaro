@@ -139,6 +139,52 @@ export function FilePicker(props: {
   );
 }
 
+/** Generic file input that only reports the selection (no upload); `accept` is a hint, callers validate. */
+export function FileInput(props: {
+  id: string;
+  label: string;
+  accept: string;
+  hint?: string;
+  error?: string;
+  disabled?: boolean;
+  /** Changing `resetKey` clears the native input. */
+  resetKey?: number;
+  onFile: (f: File | null) => void;
+}) {
+  const describedBy = [props.hint ? `${props.id}-hint` : null, props.error ? `${props.id}-error` : null]
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <div className="mb-4">
+      <label htmlFor={props.id} className="mb-1 block text-sm font-medium text-slate-900">
+        {props.label}
+      </label>
+      <input
+        key={props.resetKey}
+        id={props.id}
+        type="file"
+        accept={props.accept}
+        disabled={props.disabled}
+        aria-invalid={props.error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        onChange={(e) => props.onFile(e.target.files?.[0] ?? null)}
+        className="block w-full text-sm"
+      />
+      {props.hint && (
+        <p id={`${props.id}-hint`} className="mt-1 text-sm text-slate-700">
+          {props.hint}
+        </p>
+      )}
+      {props.error && (
+        <p id={`${props.id}-error`} className="mt-1 text-sm font-medium text-red-800">
+          <span aria-hidden="true">! </span>
+          {props.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export const tableCls = 'w-full text-left text-sm';
 export const thCls = 'border-b border-slate-400 px-2 py-2 font-semibold text-slate-900';
 export const tdCls = 'border-b border-slate-200 px-2 py-2 align-top';
