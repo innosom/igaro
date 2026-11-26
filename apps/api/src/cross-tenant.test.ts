@@ -239,5 +239,9 @@ describe.skipIf(!url)('cross-tenant 404 across the MVP admin routes (needs Postg
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('TYPE_HAS_CREDENTIALS');
     await expect404(b, 'DELETE', `/credential-types/${t.id}`);
+    // ADR 0036: a type with credentials cannot be renamed (the name is unsigned).
+    const rename = await call(a, 'PATCH', `/credential-types/${t.id}`, { name: 'Renamed after issuance' });
+    expect(rename.statusCode).toBe(409);
+    expect(rename.json().error.code).toBe('TYPE_HAS_CREDENTIALS');
   });
 });

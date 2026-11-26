@@ -199,7 +199,7 @@ export function parseTypeBody(body: unknown, mode: 'create' | 'patch'): TypeInpu
 const pgCode = (e: unknown): { code?: string } => (e && typeof e === 'object' ? (e as { code?: string }) : {});
 const duplicateCode = () => new AppError(409, 'DUPLICATE_TYPE_CODE', 'A credential type with this code already exists');
 const renameInUse = () => new AppError(409, 'TYPE_HAS_CREDENTIALS', 'This credential type has credentials and cannot be renamed');
-const inUse =() => new AppError(409, 'TYPE_HAS_CREDENTIALS', 'This credential type has credentials and cannot be deleted');
+const inUse = () => new AppError(409, 'TYPE_HAS_CREDENTIALS', 'This credential type has credentials and cannot be deleted');
 
 /** Request-scoped repository: constructed from the session, the institution is never a parameter. */
 export class CredentialTypeRepository {
