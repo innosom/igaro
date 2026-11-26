@@ -26,6 +26,7 @@ export interface VerifyRateLimit {
 export const VERIFY_PHOTO_URL_SECONDS = 300;
 const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/; // 16 random bytes as base64url
 const MAX_UA = 200;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 const PUBLIC_FIELD_NAMES = ['photo', 'idNumber', 'attributes'];
 
 interface Loaded {
@@ -52,7 +53,7 @@ interface Loaded {
     secondary_color: string;
     public_fields: unknown;
   };
-  holder: { photo_key: string | null; photo_sha256: string | null } | null;
+  holder: { id: string; photo_key: string | null; photo_sha256: string | null } | null;
   type: { code: string; name: string; kind: string } | null;
   nextToken: string | null;
 }
@@ -99,7 +100,7 @@ async function load(c: pg.PoolClient, token: string): Promise<Loaded | null> {
   ).rows[0];
   const holder = (
     await c.query<NonNullable<Loaded['holder']>>(
-      `SELECT h.photo_key, h.photo_sha256 FROM credential_holders h JOIN credentials c ON c.holder_id = h.id AND c.institution_id = h.institution_id WHERE c.id = $1`,
+      `SELECT h.id, h.photo_key, h.photo_sha256 FROM credential_holders h JOIN credentials c ON c.holder_id = h.id AND c.institution_id = h.institution_id WHERE c.id = $1`,
       [cred.id],
     )
   ).rows[0];
@@ -229,10 +230,16 @@ export class VerifyService {
     if (fields.includes('photo')) {
       holder.photoUrl = null;
       const h = loaded.holder;
-      // Only a photo whose bytes hash to the signed photoSha256 is ever shown.
-      if (this.ctx.storage && h?.photo_key && h.photo_sha256 === payload.holder.photoSha256) {
+      const signedSha = payload.holder.photoSha256;
+      // The object key is rebuilt from the SIGNED photoSha256 (keys are content-addressed, see holders.ts), never taken
+      // from the unsigned photo_key column, so a swapped column cannot point a VERIFIED result at another image. Only the
+      // extension is read from the column, and only from an allow-list. The web layer re-hashes the fetched bytes.
+      const ext = h?.photo_key ? /\.(png|jpg)$/.exec(h.photo_key)?.[1] : undefined;
+      if (this.ctx.storage && h && ext && typeof signedSha === 'string' && SHA256_RE.test(signedSha) && h.photo_sha256 === signedSha) {
         try {
-          holder.photoUrl = await this.ctx.storage.signedGetUrl(h.photo_key, VERIFY_PHOTO_URL_SECONDS);
+          const key = `institutions/${loaded.cred.institution_id}/holders/${h.id}/photo/${signedSha}.${ext}`;
+          holder.photoUrl = await this.ctx.storage.signedGetUrl(key, VERIFY_PHOTO_URL_SECONDS);
+          holder.photoSha256 = signedSha;
         } catch {
           holder.photoUrl = null;
         }

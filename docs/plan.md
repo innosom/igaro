@@ -100,7 +100,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: SSR page (8 states + fail-closed unavailable), data-driven proof panel, same-origin photo route, visitor-IP forwarding (WEB_TRUST_PROXY_HOPS, ADR 0026); 44 web tests. Open Low: photo view double-logs; deploy topology (T-047).
 - [x] T-037 [owner: igaro-qa] [deps: T-032, T-033, T-034] Verify p95 under 300 ms, URL enumeration/rate-limit tests, CLI-vs-API agreement, DB tamper returns FAILED
   - Done: apps/api/src/verify-qa.test.ts, 27 tests pass (p95 ~40 ms local); reviewer Low follow-ups for T-038: assert permission denied, 429 log-leak check, suspended-institution and issuer_key_id tamper cases.
-- [ ] T-038 [owner: igaro-security-reviewer] [deps: T-036, T-037] W4 review (verification order, rate limits, CSP, enumeration)
+- [x] T-038 [owner: igaro-security-reviewer] [deps: T-036, T-037] W4 review (verification order, rate limits, CSP, enumeration)
+  - W4 review: H1 (photo not bound to signed photoSha256) and M1 (prod TRUST_PROXY) fixed, re-review ship; Lows left open (ADR 0027).
 
 ## W5 Cards, email, import, dashboard, staging, demo
 - [ ] T-039 [owner: igaro-worker] [deps: T-025, T-016] Card render job: HTML template to PNG and PDF via headless Chrome with QR

@@ -355,6 +355,13 @@ export function loadConfig(env: Env = process.env): Config {
     throw new ConfigError('AUDIT_HEAD_PUBLIC_KEYS is required in production');
   }
 
+  // Production must state its proxy topology on purpose: an unset or false value buckets every client behind the
+  // ingress under one IP (rate limits, hashed-IP logs).
+  const trustProxy = parseTrustProxy(env.TRUST_PROXY);
+  if (nodeEnv === 'production' && trustProxy === false) {
+    throw new ConfigError('TRUST_PROXY must be set to a hop count or proxy IPs/CIDRs in production');
+  }
+
   return {
     s3: parseS3(env, nodeEnv),
     logoMaxBytes,
@@ -371,7 +378,7 @@ export function loadConfig(env: Env = process.env): Config {
     appDatabaseUrl: parseDbUrl(rawUrl, env),
     masterKey,
     ipHashKey,
-    trustProxy: parseTrustProxy(env.TRUST_PROXY),
+    trustProxy,
     cookie: {
       name: env.COOKIE_NAME ?? 'igaro_session',
       secure,
