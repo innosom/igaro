@@ -110,4 +110,20 @@ describe('api client', () => {
     expect(describeError(new ApiError(500, 'INTERNAL', 'stack trace here'))).not.toMatch(/stack/);
     expect(describeError(new Error('x'))).toBe('Something went wrong. Please try again.');
   });
+
+  it('sends multipart without a JSON content type and JSON bodies with CSRF', async () => {
+    const { fetchMock, client } = setup(json(200, me), json(200, { ok: true }), json(200, { ok: true }));
+    await client.login('a@b.co', 'pw');
+    const form = new FormData();
+    form.append('file', new Blob(['x']), 'a.png');
+    await client.upload('/institution/logo', form);
+    const up = fetchMock.mock.calls[1]![1];
+    expect(up.body).toBe(form);
+    expect(up.headers['Content-Type']).toBeUndefined();
+    expect(up.headers['X-CSRF-Token']).toBe('csrf-1');
+    await client.patch('/institution', { cardTitle: 'x' });
+    const p = fetchMock.mock.calls[2]![1];
+    expect(p.method).toBe('PATCH');
+    expect(p.headers['Content-Type']).toBe('application/json');
+  });
 });
