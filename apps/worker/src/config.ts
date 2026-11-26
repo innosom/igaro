@@ -174,6 +174,7 @@ function parseImportBatch(env: Env, nodeEnv: string): WorkerConfig['importBatch'
     throw new ConfigError('INTERNAL_API_URL is not a valid URL');
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new ConfigError('INTERNAL_API_URL must be http(s)');
+  if (nodeEnv === 'production' && u.protocol !== 'https:') throw new ConfigError('INTERNAL_API_URL must be https in production');
   if (u.username || u.password || u.search || u.hash) {
     throw new ConfigError('INTERNAL_API_URL must not contain credentials, query or fragment');
   }

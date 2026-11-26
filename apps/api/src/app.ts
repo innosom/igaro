@@ -42,7 +42,7 @@ export interface BuildAppOptions {
     Partial<
       Pick<
         Config,
-        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'internalApiToken' | 'logoMaxBytes' | 'photoMaxBytes' | 'auditHeadPublicKeys'
+        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'internalApiToken' | 'internalAllowedCidrs' | 'logoMaxBytes' | 'photoMaxBytes' | 'auditHeadPublicKeys'
       >
     >;
   db?: Db;
@@ -184,6 +184,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           registerInternalImport(api, {
             db: opts.db,
             token: opts.config.internalApiToken,
+            allowedCidrs: opts.config.internalAllowedCidrs,
             storage: opts.storage,
             masterKey: opts.config.masterKey,
             maxPhotoBytes: opts.config.photoMaxBytes ?? DEFAULT_PHOTO_MAX_BYTES,
