@@ -384,6 +384,24 @@ describe.skipIf(!url)('internal import endpoints and worker consumer (needs Post
     expect(body(await post(`${batchId}/finish`, { institutionId: INST_A, outcome: 'failed' })).status).toBe('COMPLETED');
   });
 
+  it('refuses photo input and PHOTO_* failures for a row that declared no ZIP photo', async () => {
+    const batchId = await intake(csvOf('No Photo,np-1,,STUDENT_ID,Maths,', 'No Photo Two,np-2,,STUDENT_ID,Maths,'), [
+      { name: 'np-1.jpg', data: JPEG() },
+      { name: 'np-2.jpg', data: JPEG() },
+    ]);
+    // As if the holder already had a photo: the row then takes none from the archive.
+    await ownerQuery(`UPDATE import_rows SET data = jsonb_set(data, '{photo}', '"holder"') WHERE batch_id = $1`, [batchId]);
+    expect((await post(`${batchId}/start`, { institutionId: INST_A })).statusCode).toBe(200);
+    const good = stripMetadata(JPEG(), 'image/jpeg')!;
+    const photo = { sha256: sha(good), data: good.toString('base64') };
+    const r1 = await post(`${batchId}/rows/1`, { institutionId: INST_A, photo });
+    const r2 = await post(`${batchId}/rows/2`, { institutionId: INST_A, fail: 'PHOTO_INVALID' });
+    for (const r of [r1, r2]) expect([r.statusCode, body(r)]).toEqual([200, { outcome: 'ERROR', code: 'PHOTO_NOT_EXPECTED' }]);
+    expect((await rowStates(batchId)).map((r) => [r.status, r.error])).toEqual([['ERROR', 'PHOTO_NOT_EXPECTED'], ['ERROR', 'PHOTO_NOT_EXPECTED']]);
+    expect((await ownerQuery(`SELECT 1 FROM credential_holders WHERE external_id IN ('np-1','np-2')`)).rowCount).toBe(0);
+    expect((await post(`${batchId}/finish`, { institutionId: INST_A, outcome: 'complete' })).statusCode).toBe(200);
+  });
+
   it('a row is refused while the batch is not PROCESSING', async () => {
     const batchId = await intake(csvOf('Wait One,w-1,,STUDENT_ID,Maths,'), [{ name: 'w-1.jpg', data: JPEG() }]);
     const r = await post(`${batchId}/rows/1`, { institutionId: INST_A, fail: 'PHOTO_INVALID' });
