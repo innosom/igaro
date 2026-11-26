@@ -198,7 +198,8 @@ export function parseTypeBody(body: unknown, mode: 'create' | 'patch'): TypeInpu
 
 const pgCode = (e: unknown): { code?: string } => (e && typeof e === 'object' ? (e as { code?: string }) : {});
 const duplicateCode = () => new AppError(409, 'DUPLICATE_TYPE_CODE', 'A credential type with this code already exists');
-const inUse = () => new AppError(409, 'TYPE_HAS_CREDENTIALS', 'This credential type has credentials and cannot be deleted');
+const renameInUse = () => new AppError(409, 'TYPE_HAS_CREDENTIALS', 'This credential type has credentials and cannot be renamed');
+const inUse =() => new AppError(409, 'TYPE_HAS_CREDENTIALS', 'This credential type has credentials and cannot be deleted');
 
 /** Request-scoped repository: constructed from the session, the institution is never a parameter. */
 export class CredentialTypeRepository {
@@ -267,6 +268,13 @@ export class CredentialTypeRepository {
     if (patch.attributes !== undefined) add('attribute_schema', JSON.stringify(patch.attributes), '::jsonb');
     if (patch.defaultValidityDays !== undefined) add('validity_days', patch.defaultValidityDays);
     return this.db.withTenant(this.session, async (c) => {
+      if (patch.name !== undefined) {
+        const used = await c.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM credentials WHERE type_id = $1 AND institution_id = app_institution_id()`,
+          [id],
+        );
+        if (used.rows[0]!.n > 0) throw renameInUse();
+      }
       const u = await c.query(
         `UPDATE credential_types SET ${sets.join(', ')}, updated_at = now()
           WHERE id = $1 AND institution_id = app_institution_id()`,

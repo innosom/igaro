@@ -256,7 +256,8 @@ export class VerifyService {
         secondaryColor: loaded.inst.secondary_color,
       },
       holder,
-      type: loaded.type ? { code: loaded.type.code, name: loaded.type.name, kind: loaded.type.kind } : null,
+      // The label is the SIGNED type code (ADR 0036): credential_types.name is editable and unsigned, so it is never shown as verified.
+      type: { code: payload.credentialType, name: payload.credentialType, kind: loaded.type?.kind ?? 'UNKNOWN' },
       // EXPIRED comes from core's outcome (signed expiry), never from the unsigned column.
       status: outcome.result === 'EXPIRED' ? 'EXPIRED' : loaded.cred.status,
       issuedAt: payload.issuedAt,
