@@ -94,7 +94,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: apps/api/src/public-lookups.ts (keys.json at root, GET /holder/:holderToken), ADR 0023, no migration; 10 new tests. Reviewer: ship, 0 Critical/High. Follow-ups: M1 holder-view status not integrity-checked (relabel or run verifyCredential before T-042); L1 narrow keys read policy; L2 no supersededBy link; L3 reuse slug regex; card link null until T-040.
 - [x] T-034 [owner: igaro-crypto-core] [deps: T-031] tools/verify-cli independent verifier (no iGARO API calls) with tests
   - Done: offline verifier (94 tests); core rejects non-canonical signature encodings. Low follow-ups: same strictness for audit head signature and publicKeyFromRaw.
-- [ ] T-035 [owner: igaro-web] [deps: T-010] apps/web scaffold, Tailwind, login, invite accept and password reset pages
+- [x] T-035 [owner: igaro-web] [deps: T-010] apps/web scaffold, Tailwind, login, invite accept and password reset pages
+  - Done: Next 16 + Tailwind scaffold, /login, /invite/accept, /password-reset (fragment tokens), CSP proxy, ADR 0025; 20 tests. Reviewer H1 (fragment vs query token) fixed. Open: M1 TRUST_PROXY hop count behind Next rewrite (T-047/T-037).
 - [ ] T-036 [owner: igaro-web] [deps: T-032, T-033, T-035] Public /v/:token page with all result states and data-driven proof panel (Not anchored)
 - [ ] T-037 [owner: igaro-qa] [deps: T-032, T-033, T-034] Verify p95 under 300 ms, URL enumeration/rate-limit tests, CLI-vs-API agreement, DB tamper returns FAILED
 - [ ] T-038 [owner: igaro-security-reviewer] [deps: T-036, T-037] W4 review (verification order, rate limits, CSP, enumeration)
