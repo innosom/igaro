@@ -17,6 +17,7 @@ import { CredentialLifecycleService, registerCredentialLifecycle } from './crede
 import { CredentialQueryService, registerCredentialQueries } from './credential-queries.js';
 import { DEFAULT_PHOTO_MAX_BYTES, registerHolders } from './holders.js';
 import type { ObjectStorage } from './storage.js';
+import { PublicLookupService, registerHolderView, registerPublicKeys } from './public-lookups.js';
 import { VerifyService, registerVerify } from './verify.js';
 import { hashIp, loggerOptions } from './logging.js';
 
@@ -103,6 +104,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     reply.status(404).send(errBody('NOT_FOUND', 'Not found')),
   );
 
+  const publicLookups = opts.db
+    ? new PublicLookupService({ db: opts.db, hashIp: (ip) => hashIp(ip, ipHashKey), rateLimit: opts.config.rateLimit?.verify })
+    : undefined;
+  // Public keys live at the site root (/i/:slug/keys.json), outside /api/v1 (ADR 0023).
+  if (publicLookups) registerPublicKeys(app, publicLookups);
+
   await app.register(
     async (api) => {
       api.get('/health', async () => ({ status: 'ok' }));
@@ -161,6 +168,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
             rateLimit: opts.config.rateLimit?.verify,
           }),
         );
+        if (publicLookups) registerHolderView(api, publicLookups);
         registerHolders(api, {
           db: opts.db,
           storage: opts.storage,
