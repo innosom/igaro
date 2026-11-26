@@ -37,6 +37,18 @@ export { runCardRender, ChromeCardRenderer, type CardRenderer, type CardRenderDe
 export { renderCardHtml, qrSvg, type CardModel } from './card-template.js';
 export { S3WorkerStorage, MemoryWorkerStorage, type WorkerObjectStorage } from './card-storage.js';
 
+export * from './import-batch-job.js';
+export {
+  runImportBatch,
+  failImportBatch,
+  HttpImportApi,
+  ImportApiError,
+  ImportBatchIncompleteError,
+  DEFAULT_WORKER_IMPORT_LIMITS,
+  type ImportApi,
+  type ImportBatchDeps,
+} from './import-batch.js';
+
 // --- Slots for later tasks (not implemented here) ---
-// import.csv: later task. (email.deliver: holder-delivery.ts, T-041.) (audit.dailyHead: audit-head.ts, T-028; card.render: card-render.ts, T-039.)
+// (import.batch: import-batch.ts, T-044.) (email.deliver: holder-delivery.ts, T-041.) (audit.dailyHead: audit-head.ts, T-028; card.render: card-render.ts, T-039.)
 // anchor.credential: Phase 1 only. It will read credential_events (the outbox); do NOT implement in the MVP.

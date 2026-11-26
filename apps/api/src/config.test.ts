@@ -15,6 +15,22 @@ describe('loadConfig', () => {
     expect(c.cookie).toMatchObject({ secure: false, sameSite: 'lax' });
   });
 
+  it('accepts INTERNAL_API_TOKEN (T-044, ADR 0034) and refuses short, spaced, placeholder and master-key values', () => {
+    expect(loadConfig(good).internalApiToken).toBeUndefined();
+    const t = 'x7Kq'.repeat(10);
+    expect(loadConfig({ ...good, INTERNAL_API_TOKEN: t }).internalApiToken).toBe(t);
+    for (const bad of ['short', `${t} ${t}`, 'replace-me-'.padEnd(40, 'x'), 'a'.repeat(513)]) {
+      expect(() => loadConfig({ ...good, INTERNAL_API_TOKEN: bad })).toThrow(/INTERNAL_API_TOKEN/);
+    }
+    const mk = Buffer.alloc(32, 9).toString('base64');
+    expect(() => loadConfig({ ...good, MASTER_KEY: mk, INTERNAL_API_TOKEN: mk })).toThrow(/differ from MASTER_KEY/);
+    try {
+      loadConfig({ ...good, INTERNAL_API_TOKEN: 'short' });
+    } catch (e) {
+      expect(String((e as Error).message)).not.toContain('short-secret');
+    }
+  });
+
   it('defaults account mail to the no-op and selects pg-boss on request (ADR 0006)', () => {
     expect(loadConfig(good).accountMail).toEqual({ driver: 'noop' });
     expect(loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss' }).accountMail).toEqual({

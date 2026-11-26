@@ -8,6 +8,7 @@ import { AppError, RateLimitedError } from './errors.js';
 import type { AccountMailQueue, CardRenderQueue, HolderDeliveryQueue, ImportBatchQueue } from './notifications.js';
 import { registerCredentialImport } from './credential-import-routes.js';
 import type { ImportLimits, ImportRateLimit } from './credential-import.js';
+import { registerInternalImport } from './import-internal.js';
 import { registerCardEndpoints } from './card-endpoints.js';
 import { AuthService } from './auth.js';
 import { registerAuth } from './auth-routes.js';
@@ -41,7 +42,7 @@ export interface BuildAppOptions {
     Partial<
       Pick<
         Config,
-        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'logoMaxBytes' | 'photoMaxBytes' | 'auditHeadPublicKeys'
+        'ipHashKey' | 'trustProxy' | 'cookie' | 'session' | 'tokenTtl' | 'rateLimit' | 'masterKey' | 'internalApiToken' | 'logoMaxBytes' | 'photoMaxBytes' | 'auditHeadPublicKeys'
       >
     >;
   db?: Db;
@@ -179,6 +180,18 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
           log: app.log,
           hashIp: (ip) => hashIp(ip, ipHashKey),
         });
+        if (opts.config.internalApiToken) {
+          registerInternalImport(api, {
+            db: opts.db,
+            token: opts.config.internalApiToken,
+            storage: opts.storage,
+            masterKey: opts.config.masterKey,
+            maxPhotoBytes: opts.config.photoMaxBytes ?? DEFAULT_PHOTO_MAX_BYTES,
+            cardRender: opts.cardRender,
+            delivery,
+            log: app.log,
+          });
+        }
         registerCardEndpoints(api, { db: opts.db, storage: opts.storage, log: app.log });
         registerCredentialQueries(api, new CredentialQueryService(opts.db, opts.config.auditHeadPublicKeys ?? {}));
         registerVerify(
