@@ -4,6 +4,9 @@
 import { randomUUID } from 'node:crypto';
 import multipart from '@fastify/multipart';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { PoolClient } from 'pg';
+import { appendAudit } from './audit.js';
+import { assertInstitutionActive } from './institution-guard.js';
 import type { AuthSession } from './auth.js';
 import type { Db, TenantSession } from './db.js';
 import { AppError, NotFoundError } from './errors.js';
@@ -126,7 +129,25 @@ export class InstitutionProfileRepository {
   constructor(
     private readonly db: Db,
     private readonly session: TenantSession,
+    private readonly ipHash: string | null = null,
   ) {}
+
+  private audit(c: PoolClient, action: string, metadata: Record<string, unknown>) {
+    return appendAudit(c, {
+      institutionId: this.session.institutionId,
+      actorId: this.session.userId,
+      action,
+      targetType: 'institution',
+      targetId: this.session.institutionId,
+      metadata,
+      ip: this.ipHash,
+    });
+  }
+
+  /** Early check (before an upload body is read or stored); setLogoKey re-checks inside its transaction. */
+  async assertActive(): Promise<void> {
+    await this.db.withTenant(this.session, assertInstitutionActive);
+  }
 
   async get(): Promise<InstitutionProfile> {
     return this.db.withTenant(this.session, async (c) => {
@@ -156,6 +177,7 @@ export class InstitutionProfileRepository {
       );
       const row = r.rows[0];
       if (!row) throw new NotFoundError();
+      await this.audit(c, 'institution.updated', { fields: Object.keys(patch) });
       return toProfile(row);
     });
   }
@@ -163,6 +185,7 @@ export class InstitutionProfileRepository {
   /** Point the institution at a new logo object; returns the previous key (to delete after commit). */
   async setLogoKey(key: string): Promise<{ profile: InstitutionProfile; previousKey: string | null }> {
     return this.db.withTenant(this.session, async (c) => {
+      await assertInstitutionActive(c);
       const cur = await c.query<{ logo_key: string | null }>(
         `SELECT logo_key FROM institutions WHERE id = app_institution_id() FOR UPDATE`,
       );
@@ -172,6 +195,7 @@ export class InstitutionProfileRepository {
           WHERE id = app_institution_id() RETURNING ${COLS}`,
         [key],
       );
+      await this.audit(c, 'institution.logo_updated', {});
       return { profile: toProfile(r.rows[0]!), previousKey: cur.rows[0].logo_key };
     });
   }
@@ -189,11 +213,12 @@ export interface ProfileRoutesOptions {
   storage: ObjectStorage | undefined;
   logoMaxBytes: number;
   log: FastifyBaseLogger;
+  hashIp?: (ip: string | undefined) => string | undefined;
 }
 
 export function registerInstitutionProfile(app: FastifyInstance, o: ProfileRoutesOptions): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
-  const repo = (req: FastifyRequest) => new InstitutionProfileRepository(o.db, tenantScope(req));
+  const repo = (req: FastifyRequest) => new InstitutionProfileRepository(o.db, tenantScope(req), o.hashIp?.(req.ip) ?? null);
 
   app.get('/institution', ia, async (req, reply) => {
     void reply.header('Cache-Control', 'no-store');
@@ -205,7 +230,6 @@ export function registerInstitutionProfile(app: FastifyInstance, o: ProfileRoute
     const patch = parseProfilePatch(req.body);
     const scope = tenantScope(req);
     const out = await repo(req).update(patch);
-    // TODO(T-024): audit_logs entry in the same transaction. Until then: field names only, no values.
     o.log.info(
       { event: 'institution.updated', actorId: scope.userId, institutionId: scope.institutionId, fields: Object.keys(patch) },
       'institution profile updated',
@@ -223,6 +247,7 @@ export function registerInstitutionProfile(app: FastifyInstance, o: ProfileRoute
       void reply.header('Cache-Control', 'no-store');
       const scope = tenantScope(req);
       if (!o.storage) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'File storage is not available');
+      await repo(req).assertActive(); // suspended institution: refuse before reading or storing anything
       // The type comes from the bytes, never from the client's content-type or file name.
       const { type, bytes: clean } = await readImageUpload(req, 'Logo');
 

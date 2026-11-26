@@ -5,6 +5,8 @@
 // attribute list never touches already signed credentials: their payload carries its own attributes.
 import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { PoolClient } from 'pg';
+import { appendAudit } from './audit.js';
 import type { AuthSession } from './auth.js';
 import { isUuid, type Db, type TenantSession } from './db.js';
 import { AppError, NotFoundError } from './errors.js';
@@ -203,7 +205,20 @@ export class CredentialTypeRepository {
   constructor(
     private readonly db: Db,
     private readonly session: TenantSession,
+    private readonly ipHash: string | null = null,
   ) {}
+
+  private audit(c: PoolClient, action: string, targetId: string, metadata: Record<string, unknown>) {
+    return appendAudit(c, {
+      institutionId: this.session.institutionId,
+      actorId: this.session.userId,
+      action,
+      targetType: 'credential_type',
+      targetId,
+      metadata,
+      ip: this.ipHash,
+    });
+  }
 
   async list(): Promise<CredentialTypeView[]> {
     return this.db.withTenant(this.session, async (c) => {
@@ -231,6 +246,7 @@ export class CredentialTypeRepository {
           [id, input.code, input.name, input.kind, JSON.stringify(input.attributes), input.defaultValidityDays],
         );
         const r = await c.query<Row>(`${SELECT} WHERE t.id = $1 AND t.institution_id = app_institution_id()`, [id]);
+        await this.audit(c, 'credential_type.created', id, { code: input.code, kind: input.kind });
         return toView(r.rows[0]!);
       });
     } catch (e) {
@@ -258,6 +274,7 @@ export class CredentialTypeRepository {
       );
       if (u.rowCount === 0) throw new NotFoundError();
       const r = await c.query<Row>(`${SELECT} WHERE t.id = $1 AND t.institution_id = app_institution_id()`, [id]);
+      await this.audit(c, 'credential_type.updated', id, { fields: Object.keys(patch) });
       return toView(r.rows[0]!);
     });
   }
@@ -266,17 +283,18 @@ export class CredentialTypeRepository {
     if (!isUuid(id)) throw new NotFoundError();
     try {
       await this.db.withTenant(this.session, async (c) => {
-        const cur = await c.query(
-          `SELECT 1 FROM credential_types WHERE id = $1 AND institution_id = app_institution_id() FOR UPDATE`,
+        const cur = await c.query<{ code: string }>(
+          `SELECT code FROM credential_types WHERE id = $1 AND institution_id = app_institution_id() FOR UPDATE`,
           [id],
         );
-        if (cur.rowCount === 0) throw new NotFoundError();
+        if (!cur.rows[0]) throw new NotFoundError();
         const n = await c.query<{ n: number }>(
           `SELECT count(*)::int AS n FROM credentials WHERE type_id = $1 AND institution_id = app_institution_id()`,
           [id],
         );
         if (n.rows[0]!.n > 0) throw inUse();
         await c.query(`DELETE FROM credential_types WHERE id = $1 AND institution_id = app_institution_id()`, [id]);
+        await this.audit(c, 'credential_type.deleted', id, { code: cur.rows[0].code });
       });
     } catch (e) {
       if (pgCode(e).code === '23503') throw inUse(); // FK RESTRICT is the backstop
@@ -291,11 +309,14 @@ const tenantScope = (req: FastifyRequest): TenantSession => {
   return { kind: 'tenant', userId: s.userId, institutionId: s.institutionId };
 };
 
-export function registerCredentialTypes(app: FastifyInstance, o: { db: Db; log: FastifyBaseLogger }): void {
+export function registerCredentialTypes(
+  app: FastifyInstance,
+  o: { db: Db; log: FastifyBaseLogger; hashIp?: (ip: string | undefined) => string | undefined },
+): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
-  const repo = (req: FastifyRequest) => new CredentialTypeRepository(o.db, tenantScope(req));
+  const repo = (req: FastifyRequest) => new CredentialTypeRepository(o.db, tenantScope(req), o.hashIp?.(req.ip) ?? null);
   const noStore = (reply: { header: (k: string, v: string) => unknown }) => void reply.header('Cache-Control', 'no-store');
-  // TODO(T-024): audit entries for create/update/delete in the same transaction.
+  // Audit entries are written inside the repository transactions; these are operational logs only.
   const logEvent = (req: FastifyRequest, event: string, typeId: string, extra: object = {}) => {
     const s = tenantScope(req);
     o.log.info({ event, actorId: s.userId, institutionId: s.institutionId, credentialTypeId: typeId, ...extra }, event);

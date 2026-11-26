@@ -445,7 +445,7 @@ describe.skipIf(!url)('credential issuance (needs Postgres)', () => {
     it('after rotation the new ACTIVE key signs, and the old (RETIRED) credential still verifies against its own kid', async () => {
       const old = await activeKey(INST_A);
       const first = (await issue(a, good)).json();
-      const rot = await app.inject({ method: 'POST', url: '/api/v1/institution/keys/rotate', headers: { ...a.headers, ...json }, payload: {} });
+      const rot = await app.inject({ method: 'POST', url: '/api/v1/institution/keys/rotate', headers: { ...a.headers, ...json }, payload: { password: PW } });
       expect(rot.statusCode).toBeLessThan(300);
       const now = await activeKey(INST_A);
       expect(now.kid).not.toBe(old.kid);
