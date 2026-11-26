@@ -18,6 +18,8 @@ const nextConfig = {
   async headers() {
     return [
       { source: '/v/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
+      // Private holder pages (ADR 0032): the URL carries the holder token.
+      { source: '/h/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
       {
         source: '/:path*',
         headers: [

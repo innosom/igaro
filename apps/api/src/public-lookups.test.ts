@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { generateSigningKey } from '@igaro/core';
+import { cardStorageKeys } from '@igaro/worker/producer';
 import { buildApp } from './app.js';
 import { csrfTokenFor, hashPassword } from './auth.js';
 import { Db } from './db.js';
@@ -186,10 +187,195 @@ describe.skipIf(!url)('public keys and holder view (needs Postgres)', () => {
       type: { code: 'STUDENT_ID' },
       links: { verify: `/v/${c.verificationToken}`, credentialJson: `/api/v1/verify/${c.verificationToken}/credential.json` },
     });
-    for (const secret of [c.payload.salt, c.id, c.holderToken, c.credentialNumber, INST.A, 'photoSha256']) expect(res.body).not.toContain(secret);
+    // The card links are relative paths that carry the holder token the caller already holds (ADR 0031).
+    expect(body.credentials[0].links.card).toBe(`/api/v1/holder/${c.holderToken}/card.png`);
+    expect(body.credentials[0].links.cardPdf).toBe(`/api/v1/holder/${c.holderToken}/card.pdf`);
+    for (const secret of [c.payload.salt, c.id, c.credentialNumber, INST.A, 'photoSha256']) expect(res.body).not.toContain(secret);
+    expect(res.body.split(c.holderToken).length - 1).toBe(2);
     const rev = await post(client.A, `/credentials/${c.id}/revoke`, { reason: 'test' });
     expect(rev.statusCode).toBe(200);
-    expect((await get(`/api/v1/holder/${c.holderToken}`)).json().credentials[0].status).toBe('REVOKED');
+    const after = (await get(`/api/v1/holder/${c.holderToken}`)).json().credentials[0];
+    expect(after.status).toBe('REVOKED');
+    expect(after.links.card).toBeNull();
+    expect(after.links.cardPdf).toBeNull();
+  });
+
+  describe('holder card download (ADR 0031)', () => {
+    const card = (tok: string, ext: 'png' | 'pdf' = 'png', ip = RAW_IP, a: FastifyInstance = app) => get(`/api/v1/holder/${tok}/card.${ext}`, ip, a);
+    const putCard = async (c: Issued, inst = INST.A) => {
+      const k = cardStorageKeys(inst, c.id);
+      await storage.put(k.png, Buffer.from('png'), 'image/png');
+      await storage.put(k.pdf, Buffer.from('pdf'), 'application/pdf');
+    };
+    const tamper = async (id: string, set: string) => {
+      await owner.query('BEGIN');
+      try {
+        await owner.query(`SELECT set_config('app.is_platform_admin','true',true)`);
+        await owner.query('ALTER TABLE credentials DISABLE TRIGGER USER');
+        await owner.query(`UPDATE credentials SET ${set} WHERE id = $1`, [id]);
+        await owner.query('ALTER TABLE credentials ENABLE TRIGGER USER');
+        await owner.query('COMMIT');
+      } catch (e) {
+        await owner.query('ROLLBACK');
+        throw e;
+      }
+    };
+
+    it('302 to a 60 s signed URL for both formats; no-store, no-referrer; token and URL never logged', async () => {
+      const c = await issue('A');
+      await putCard(c);
+      lines.length = 0;
+      for (const ext of ['png', 'pdf'] as const) {
+        const res = await card(c.holderToken, ext);
+        expect(res.statusCode).toBe(302);
+        expect(res.headers['cache-control']).toBe('no-store');
+        expect(res.headers['referrer-policy']).toBe('no-referrer');
+        const loc = String(res.headers.location);
+        expect(loc).toContain(encodeURIComponent(cardStorageKeys(INST.A, c.id)[ext]));
+        expect(loc).toContain('expires=60');
+      }
+      const all = lines.join('');
+      expect(all).not.toContain(c.holderToken);
+      expect(all).not.toContain(encodeURIComponent(cardStorageKeys(INST.A, c.id).png));
+      expect(all).toContain('/holder/:token/card.png');
+    });
+
+    it('404 CARD_NOT_READY with Retry-After before the render; 503 when storage fails', async () => {
+      const c = await issue('A');
+      const res = await card(c.holderToken);
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error.code).toBe('CARD_NOT_READY');
+      expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+      expect(res.headers.location).toBeUndefined();
+      storage.failExists = true;
+      try {
+        const r = await card(c.holderToken);
+        expect(r.statusCode).toBe(503);
+        expect(r.json().error.code).toBe('STORAGE_UNAVAILABLE');
+      } finally {
+        storage.failExists = false;
+      }
+    });
+
+    it('uniform 404 for unknown, malformed, verification-token and non-active credentials', async () => {
+      const sus = await issue('A');
+      const rev = await issue('A');
+      const sup = await issue('A');
+      for (const c of [sus, rev, sup]) await putCard(c);
+      expect((await post(client.A, `/credentials/${sus.id}/suspend`, { reason: 'check' })).statusCode).toBe(200);
+      expect((await post(client.A, `/credentials/${rev.id}/revoke`, { reason: 'fraud' })).statusCode).toBe(200);
+      expect((await post(client.A, `/credentials/${sup.id}/reissue`, { reason: 'fix' })).statusCode).toBe(201);
+      const bodies = new Set<string>();
+      for (const t of [randomBytes(16).toString('base64url'), 'short', 'x'.repeat(300), sus.verificationToken, sus.holderToken, rev.holderToken, sup.holderToken]) {
+        const res = await card(t, 'pdf');
+        expect(res.statusCode).toBe(404);
+        expect(res.headers.location).toBeUndefined();
+        bodies.add(res.body);
+      }
+      expect(bodies.size).toBe(1);
+      expect(bodies.has(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found' } }))).toBe(true);
+      // Reinstatement brings the card back.
+      expect((await post(client.A, `/credentials/${sus.id}/reinstate`, {})).statusCode).toBe(200);
+      expect((await card(sus.holderToken)).statusCode).toBe(302);
+    });
+
+    it('cross-holder-token isolation: a token only ever yields its own credential card, never another tenant or holder', async () => {
+      const a = await issue('A');
+      const a2 = await issue('A');
+      const s = await issue('S');
+      await putCard(a);
+      await putCard(a2);
+      await putCard(s, INST.S);
+      const loc = async (t: string) => String((await card(t)).headers.location);
+      expect(await loc(a.holderToken)).toContain(encodeURIComponent(cardStorageKeys(INST.A, a.id).png));
+      expect(await loc(a.holderToken)).not.toContain(a2.id);
+      expect(await loc(s.holderToken)).toContain(encodeURIComponent(cardStorageKeys(INST.S, s.id).png));
+      expect(await loc(s.holderToken)).not.toContain(INST.A);
+      // Tenant A's object placed under S's prefix is unreachable with A's token: keys derive from the row, not the request.
+      const sNotReady = await issue('S');
+      await storage.put(cardStorageKeys(INST.A, sNotReady.id).png, Buffer.from('x'), 'image/png');
+      expect((await card(sNotReady.holderToken)).json().error.code).toBe('CARD_NOT_READY');
+      // The verification token, the credential id and the credential number are not accepted in place of the holder token.
+      for (const t of [a.verificationToken, a.credentialNumber, a.id]) expect((await card(t)).statusCode).toBe(404);
+    });
+
+    it('tampered payload, hash or signature is never served; ops alert has ids only; same 404', async () => {
+      const cases: [string, string][] = [
+        ['payload', `payload = jsonb_set(payload, '{holder,fullName}', '"Mallory"')`],
+        ['data_hash', `data_hash = repeat('0', 64)`],
+        ['signature', `signature = repeat('A', 86)`],
+      ];
+      for (const [label, set] of cases) {
+        const c = await issue('A');
+        await putCard(c);
+        expect((await card(c.holderToken)).statusCode).toBe(302);
+        await tamper(c.id, set);
+        lines.length = 0;
+        const res = await card(c.holderToken);
+        expect(res.statusCode, label).toBe(404);
+        expect(res.json()).toEqual({ error: { code: 'NOT_FOUND', message: 'Not found' } });
+        const alert = lines.find((l) => l.includes('card.integrity_failure'));
+        expect(alert, label).toBeDefined();
+        expect(alert).toContain(c.id);
+        expect(alert).not.toContain('Mallory');
+        expect(alert).not.toContain(c.holderToken);
+        expect(alert).not.toContain(c.verificationToken);
+      }
+    });
+
+    it('404 once the SIGNED expiry has passed, and links.card is null for an expired credential', async () => {
+      const soon = new Date(Date.now() + 2000).toISOString().slice(0, 19) + 'Z';
+      const res = await post(client.A, '/credentials', { holderId: HOLDER.A, credentialTypeCode: 'STUDENT_ID', attributes: { program: 'Computer Science' }, expiresAt: soon });
+      expect(res.statusCode).toBe(201);
+      const c = res.json() as Issued;
+      await putCard(c);
+      expect((await card(c.holderToken)).statusCode).toBe(302);
+      expect((await get(`/api/v1/holder/${c.holderToken}`)).json().credentials[0].links.card).not.toBeNull();
+      await new Promise((r) => setTimeout(r, 3100));
+      expect((await card(c.holderToken)).statusCode).toBe(404);
+      const view = (await get(`/api/v1/holder/${c.holderToken}`)).json().credentials[0];
+      expect(view.status).toBe('EXPIRED');
+      expect(view.links.card).toBeNull();
+      expect(view.links.cardPdf).toBeNull();
+    });
+
+    it('503 when storage is not configured (after the lookup; unknown tokens stay 404)', async () => {
+      const c = await issue('A');
+      const noStore = await buildApp({
+        config: { logLevel: 'silent', ipHashKey, masterKey: master, rateLimit: { login: BIG, reset: BIG, token: { ipMax: 10000, windowSeconds: 900 }, verify: { ipMax: 10000, tokenMax: 10000, windowSeconds: 60 } } },
+        db,
+      });
+      try {
+        const r = await card(c.holderToken, 'png', RAW_IP, noStore);
+        expect(r.statusCode).toBe(503);
+        expect(r.json().error.code).toBe('STORAGE_UNAVAILABLE');
+        expect((await card(randomBytes(16).toString('base64url'), 'png', RAW_IP, noStore)).statusCode).toBe(404);
+      } finally {
+        await noStore.close();
+      }
+    });
+
+    it('reuses the per-IP limit and the per-token miss limit', async () => {
+      const tight = new Db({ connectionString: url!, max: 4, poolConfig: { options: `-c search_path=${schema} -c role=igaro_app` } });
+      const a2 = await buildApp({
+        config: { logLevel: 'silent', ipHashKey, masterKey: master, rateLimit: { login: BIG, reset: BIG, token: { ipMax: 10000, windowSeconds: 900 }, verify: { ipMax: 3, tokenMax: 2, windowSeconds: 60 } } },
+        db: tight,
+        storage,
+      });
+      try {
+        const tok = randomBytes(16).toString('base64url');
+        const missCodes: number[] = [];
+        for (let i = 0; i < 4; i++) missCodes.push((await card(tok, 'png', `198.51.100.${20 + i}`, a2)).statusCode);
+        expect(missCodes).toEqual([404, 404, 429, 429]);
+        const ipCodes: number[] = [];
+        for (let i = 0; i < 5; i++) ipCodes.push((await card(randomBytes(16).toString('base64url'), 'pdf', '198.51.100.40', a2)).statusCode);
+        expect(ipCodes).toEqual([404, 404, 404, 429, 429]);
+        expect((await card(tok, 'png', '198.51.100.40', a2)).headers['retry-after']).toBeDefined();
+      } finally {
+        await a2.close();
+        await tight.close();
+      }
+    });
   });
 
   it('holder view is 404 with one uniform body for unknown, malformed, oversized and verification tokens', async () => {
