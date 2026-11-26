@@ -98,7 +98,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: Next 16 + Tailwind scaffold, /login, /invite/accept, /password-reset (fragment tokens), CSP proxy, ADR 0025; 20 tests. Reviewer H1 (fragment vs query token) fixed. Open: M1 TRUST_PROXY hop count behind Next rewrite (T-047/T-037).
 - [x] T-036 [owner: igaro-web] [deps: T-032, T-033, T-035] Public /v/:token page with all result states and data-driven proof panel (Not anchored)
   - Done: SSR page (8 states + fail-closed unavailable), data-driven proof panel, same-origin photo route, visitor-IP forwarding (WEB_TRUST_PROXY_HOPS, ADR 0026); 44 web tests. Open Low: photo view double-logs; deploy topology (T-047).
-- [ ] T-037 [owner: igaro-qa] [deps: T-032, T-033, T-034] Verify p95 under 300 ms, URL enumeration/rate-limit tests, CLI-vs-API agreement, DB tamper returns FAILED
+- [x] T-037 [owner: igaro-qa] [deps: T-032, T-033, T-034] Verify p95 under 300 ms, URL enumeration/rate-limit tests, CLI-vs-API agreement, DB tamper returns FAILED
+  - Done: apps/api/src/verify-qa.test.ts, 27 tests pass (p95 ~40 ms local); reviewer Low follow-ups for T-038: assert permission denied, 429 log-leak check, suspended-institution and issuer_key_id tamper cases.
 - [ ] T-038 [owner: igaro-security-reviewer] [deps: T-036, T-037] W4 review (verification order, rate limits, CSP, enumeration)
 
 ## W5 Cards, email, import, dashboard, staging, demo
