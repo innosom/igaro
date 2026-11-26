@@ -61,9 +61,16 @@ describe.skipIf(!hasDatabase)('audit head tables: worker-only writes (needs Post
       expect(await h.code(() => c.query(`UPDATE audit_head_hashes SET head_hash = 'x'`))).toBe('42501');
       expect(await h.code(() => c.query(`DELETE FROM audit_head_hashes`))).toBe('42501');
       expect(await h.code(() => c.query(`UPDATE audit_head_timestamps SET state = 'COMPLETE'`))).toBe('42501');
-      for (const t of ['institution_keys', 'sessions', 'users', 'credentials', 'invites', 'password_resets']) {
+      for (const t of ['institution_keys', 'sessions', 'users', 'invites', 'password_resets']) {
         expect(await h.code(() => c.query(`SELECT 1 FROM ${t}`)), t).toBe('42501');
       }
+      // T-039 (ADR 0028): column-level read for cards only; secrets and writes stay refused.
+      expect(await h.code(() => c.query(`SELECT id, payload, verification_token FROM credentials`))).toBeUndefined();
+      for (const col of ['signature', 'data_hash', 'holder_token_hash']) {
+        expect(await h.code(() => c.query(`SELECT ${col} FROM credentials`)), col).toBe('42501');
+      }
+      expect(await h.code(() => c.query(`SELECT email FROM credential_holders`))).toBe('42501');
+      expect(await h.code(() => c.query(`UPDATE credentials SET status = 'ACTIVE'`))).toBe('42501');
       expect(await h.code(() => c.query(`INSERT INTO audit_logs (id, institution_id, seq, action, prev_hash, entry_hash) VALUES ($1,$2,9,'x','p','e')`, [h.uid(), h.A.institutionId]))).toBe('42501');
     });
   });

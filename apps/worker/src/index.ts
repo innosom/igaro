@@ -29,6 +29,11 @@ export {
   type Timestamper,
 } from './ots.js';
 
+export * from './card-render-job.js';
+export { runCardRender, ChromeCardRenderer, type CardRenderer, type CardRenderDeps } from './card-render.js';
+export { renderCardHtml, qrSvg, type CardModel } from './card-template.js';
+export { S3WorkerStorage, MemoryWorkerStorage, type WorkerObjectStorage } from './card-storage.js';
+
 // --- Slots for later tasks (not implemented here) ---
-// card.render, email.deliver (holder card mail), import.csv: later tasks. (audit.dailyHead: see audit-head.ts, T-028.)
+// email.deliver (holder card mail), import.csv: later tasks. (audit.dailyHead: audit-head.ts, T-028; card.render: card-render.ts, T-039.)
 // anchor.credential: Phase 1 only. It will read credential_events (the outbox); do NOT implement in the MVP.

@@ -1,5 +1,6 @@
 // Producer-only entry for the API (`@igaro/worker/producer`): no nodemailer, no handlers.
 export * from './account-mail-job.js';
+export * from './card-render-job.js';
 export {
   PgBossAccountMailQueue,
   connectAccountMailQueue,

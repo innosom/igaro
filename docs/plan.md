@@ -104,7 +104,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - W4 review: H1 (photo not bound to signed photoSha256) and M1 (prod TRUST_PROXY) fixed, re-review ship; Lows left open (ADR 0027).
 
 ## W5 Cards, email, import, dashboard, staging, demo
-- [ ] T-039 [owner: igaro-worker] [deps: T-025, T-016] Card render job: HTML template to PNG and PDF via headless Chrome with QR
+- [x] T-039 [owner: igaro-worker] [deps: T-025, T-016] Card render job: HTML template to PNG and PDF via headless Chrome with QR
+  - Done: apps/worker card.render job, worker-role column grants migration, ADR 0028; review ship, 0 Critical/High; M1 (no sandbox in production refused), L1 (logo prefix), L4 (expiry 300 s) fixed. Follow-ups: scoped worker S3 keys (M2); T-040 should verify the signature before serving cards (L3).
 - [ ] T-040 [owner: igaro-api] [deps: T-039] card.png and card.pdf endpoints, enqueue render and delivery jobs after issuance
 - [ ] T-041 [owner: igaro-worker] [deps: T-039, T-033] Holder delivery email with private /h/:token link
 - [ ] T-042 [owner: igaro-web] [deps: T-033, T-040, T-035] Private holder page /h/:token (card and credential file download)

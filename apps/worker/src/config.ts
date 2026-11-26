@@ -3,6 +3,16 @@
 import { parseMasterKey } from '@igaro/core';
 import { AUDIT_DAILY_HEAD_CRON } from './audit-head.js';
 import { parseCalendarUrls } from './ots.js';
+import type { S3Config } from './card-storage.js';
+import { existsSync } from 'node:fs';
+
+const DEFAULT_CHROME_PATHS = ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+
+/** CHROME_PATH wins; otherwise the first well-known install location that exists. */
+export function findChrome(env: Record<string, string | undefined> = process.env): string | undefined {
+  if (env.CHROME_PATH) return env.CHROME_PATH;
+  return DEFAULT_CHROME_PATHS.find((p) => existsSync(p));
+}
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -38,6 +48,13 @@ export interface WorkerConfig {
     | undefined;
   /** OpenTimestamps calendar base URLs. Empty = timestamping disabled (heads are still signed). */
   otsCalendars: string[];
+  /**
+   * card.render (T-039, ADR 0028). `undefined` = job not registered. Needs private storage (same S3_* variables
+   * as the API) and a Chrome executable (CHROME_PATH, else the first of /usr/bin/chromium, chromium-browser, google-chrome).
+   */
+  cardRender:
+    | { s3: S3Config; chromePath: string; chromeNoSandbox: boolean; verifyBaseUrl: string }
+    | undefined;
 }
 
 type Env = Record<string, string | undefined>;
@@ -123,7 +140,57 @@ export function loadWorkerConfig(env: Env = process.env): WorkerConfig {
     webBaseUrl: parseWebBaseUrl(env.WEB_BASE_URL || env.PUBLIC_WEB_URL, nodeEnv),
     auditHead: parseAuditHead(env, nodeEnv),
     otsCalendars: parseOtsCalendars(env, nodeEnv),
+    cardRender: parseCardRender(env, nodeEnv),
   };
+}
+
+function parseS3(env: Env, nodeEnv: string): S3Config | undefined {
+  const { S3_BUCKET: bucket, S3_ACCESS_KEY: accessKey, S3_SECRET_KEY: secretKey } = env;
+  if (!bucket && !accessKey && !secretKey) return undefined;
+  if (!bucket || !accessKey || !secretKey) {
+    throw new ConfigError('S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY must be set together');
+  }
+  if (PLACEHOLDER.test(secretKey) || PLACEHOLDER.test(accessKey)) throw new ConfigError('S3 credentials look like placeholders');
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new ConfigError('S3_BUCKET is not a valid bucket name');
+  const region = env.S3_REGION || 'us-east-1';
+  const endpoint = env.S3_ENDPOINT || `https://s3.${region}.amazonaws.com`;
+  let u: URL;
+  try {
+    u = new URL(endpoint);
+  } catch {
+    throw new ConfigError('S3_ENDPOINT is not a valid URL');
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new ConfigError('S3_ENDPOINT must be http(s)');
+  if (u.username || u.password) throw new ConfigError('S3_ENDPOINT must not contain credentials');
+  if (nodeEnv === 'production' && u.protocol !== 'https:') throw new ConfigError('S3_ENDPOINT must use https in production');
+  const fps = env.S3_FORCE_PATH_STYLE;
+  if (fps !== undefined && fps !== '' && fps !== 'true' && fps !== 'false') {
+    throw new ConfigError('S3_FORCE_PATH_STYLE must be true or false');
+  }
+  return { endpoint, region, bucket, accessKey, secretKey, forcePathStyle: fps === undefined || fps === '' ? Boolean(env.S3_ENDPOINT) : fps === 'true' };
+}
+
+function parseCardRender(env: Env, nodeEnv: string): WorkerConfig['cardRender'] {
+  const s3 = parseS3(env, nodeEnv);
+  // Not configured = job not registered (the worker logs a warning at startup), like audit.dailyHead outside production.
+  if (!s3) return undefined;
+  const chromePath = findChrome(env);
+  if (!chromePath) return undefined;
+  // The credential column grants for cards exist only for igaro_worker.
+  if (nodeEnv === 'production' && !env.WORKER_DATABASE_URL) {
+    throw new ConfigError('WORKER_DATABASE_URL (igaro_worker login) is required in production for card.render');
+  }
+  if (!chromePath.startsWith('/')) throw new ConfigError('CHROME_PATH must be an absolute path');
+  if (env.CHROME_NO_SANDBOX !== undefined && env.CHROME_NO_SANDBOX !== 'true' && env.CHROME_NO_SANDBOX !== 'false') {
+    throw new ConfigError('CHROME_NO_SANDBOX must be true or false');
+  }
+  if (nodeEnv === 'production' && env.CHROME_NO_SANDBOX === 'true') {
+    throw new ConfigError('CHROME_NO_SANDBOX=true is refused in production (Chrome sandbox must stay on)');
+  }
+  // The QR points at the public verification site. Default: verify.igaro.app in production, the web app elsewhere.
+  const raw = env.VERIFY_BASE_URL || (nodeEnv === 'production' ? 'https://verify.igaro.app' : env.WEB_BASE_URL || env.PUBLIC_WEB_URL);
+  if (!raw) throw new ConfigError('VERIFY_BASE_URL or WEB_BASE_URL is required for card.render');
+  return { s3, chromePath, chromeNoSandbox: env.CHROME_NO_SANDBOX === 'true', verifyBaseUrl: parseWebBaseUrl(raw, nodeEnv) };
 }
 
 const DEFAULT_OTS_CALENDARS = [
