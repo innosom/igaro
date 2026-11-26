@@ -110,7 +110,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   );
 
   const publicLookups = opts.db
-    ? new PublicLookupService({ db: opts.db, hashIp: (ip) => hashIp(ip, ipHashKey), rateLimit: opts.config.rateLimit?.verify })
+    ? new PublicLookupService({ db: opts.db, hashIp: (ip) => hashIp(ip, ipHashKey), rateLimit: opts.config.rateLimit?.verify, storage: opts.storage, log: app.log })
     : undefined;
   // Public keys live at the site root (/i/:slug/keys.json), outside /api/v1 (ADR 0023).
   if (publicLookups) registerPublicKeys(app, publicLookups);

@@ -2,10 +2,14 @@
 // No session, no migration: both use narrow lookup policies from the init migration (app.institution_slug, app.holder_token_hash).
 // Never returned: private key material, internal ids, credential numbers, salt, holder token. Never logged: tokens.
 import { createHash } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { verifyCredentialIntegrity } from '@igaro/core';
+import { cardStorageKeys } from '@igaro/worker/producer';
+import { CARD_RETRY_AFTER_SECONDS, CARD_URL_SECONDS } from './card-endpoints.js';
 import { DEFAULT_VERIFY_LIMIT } from './config.js';
 import type { Db } from './db.js';
-import { NotFoundError, RateLimitedError } from './errors.js';
+import { AppError, NotFoundError, RateLimitedError } from './errors.js';
+import type { ObjectStorage } from './storage.js';
 import { RateLimiter } from './rate-limit.js';
 import type { VerifyRateLimit } from './verify.js';
 
@@ -17,6 +21,8 @@ export interface PublicLookupContext {
   db: Db;
   hashIp: (ip: string | undefined) => string | undefined;
   rateLimit?: VerifyRateLimit | undefined;
+  storage?: ObjectStorage | undefined;
+  log?: FastifyBaseLogger | undefined;
 }
 
 export class PublicLookupService {
@@ -113,6 +119,7 @@ export class PublicLookupService {
     const { cr, inst, holder, type } = found;
     const expired = cr.status === 'ACTIVE' && cr.expires_at !== null && cr.expires_at.getTime() <= Date.now();
     const vt = cr.verification_token;
+    const cardLive = cr.status === 'ACTIVE' && !expired;
     return {
       holder: { fullName: holder.full_name },
       institution: {
@@ -134,11 +141,95 @@ export class PublicLookupService {
             verify: `/v/${vt}`,
             credentialJson: `/api/v1/verify/${vt}/credential.json`,
             publicKeys: `/i/${inst.slug}/keys.json`,
-            card: null, // card.png/card.pdf for holders arrive with T-040/T-042 (ADR 0023)
+            // Token-authenticated downloads (ADR 0031); offered only while the credential is ACTIVE and unexpired.
+            card: cardLive ? `/api/v1/holder/${token}/card.png` : null,
+            cardPdf: cardLive ? `/api/v1/holder/${token}/card.pdf` : null,
           },
         },
       ],
     };
+  }
+
+  /** Holder card download (ADR 0031): the ADR 0029 serve-only-what-verifies rules, authenticated by the holder token. */
+  async holderCard(token: string, ext: 'png' | 'pdf', req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> {
+    this.limit(this.holderIp, req);
+    const miss = (): never => {
+      const wait = this.holderMiss.consume(sha256Hex(token));
+      if (wait > 0) throw new RateLimitedError(wait);
+      throw new NotFoundError();
+    };
+    if (!TOKEN_RE.test(token)) return miss();
+    const hash = sha256Hex(token);
+    const row = await this.ctx.db.withLookup({ 'app.holder_token_hash': hash }, async (c) => {
+      const cr = (
+        await c.query<{
+          id: string;
+          institution_id: string;
+          status: string;
+          payload: unknown;
+          data_hash: string;
+          signature: string;
+          issuer_kid: string;
+        }>(
+          `SELECT id, institution_id, status::text AS status, payload, data_hash, signature, issuer_kid
+             FROM credentials WHERE holder_token_hash = $1`,
+          [hash],
+        )
+      ).rows[0];
+      if (!cr || cr.status === 'DRAFT') return null;
+      await c.query(`SELECT set_config('app.institution_id', $1, true)`, [cr.institution_id]);
+      const key = (
+        await c.query<{ public_key: string; status: string }>(
+          `SELECT public_key, status::text AS status FROM institution_keys WHERE institution_id = $1 AND kid = $2`,
+          [cr.institution_id, cr.issuer_kid],
+        )
+      ).rows[0];
+      return { cr, key };
+    });
+    if (!row) return miss();
+    const { cr, key } = row;
+    const payload = cr.payload as { credentialId?: unknown; institutionId?: unknown; expiresAt?: unknown } | null;
+    const ok =
+      !!key &&
+      key.status !== 'COMPROMISED' &&
+      payload?.credentialId === cr.id &&
+      payload?.institutionId === cr.institution_id &&
+      verifyCredentialIntegrity(cr.payload, cr.data_hash, cr.signature, key.public_key) === 'OK';
+    if (!ok) {
+      this.ctx.log?.error(
+        { event: 'card.integrity_failure', institutionId: cr.institution_id, credentialId: cr.id, via: 'holder' },
+        'stored credential failed integrity check; card not served',
+      );
+      return miss();
+    }
+    // Integrity first (invariant 7), then state. Expiry comes from the signed payload.
+    const exp = payload?.expiresAt;
+    const expired = typeof exp === 'string' && Date.parse(exp) <= Date.now();
+    if (cr.status !== 'ACTIVE' || expired) return miss();
+
+    const storage = this.ctx.storage;
+    if (!storage) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Cards are not available right now');
+    const storageKey = cardStorageKeys(cr.institution_id, cr.id)[ext];
+    let url: string;
+    try {
+      if (!(await storage.exists(storageKey))) {
+        void reply.header('Retry-After', String(CARD_RETRY_AFTER_SECONDS));
+        return reply.status(404).send({ error: { code: 'CARD_NOT_READY', message: 'The card is not ready yet' } });
+      }
+      url = await storage.signedGetUrl(storageKey, CARD_URL_SECONDS);
+    } catch {
+      this.ctx.log?.error(
+        { event: 'card.storage_failed', institutionId: cr.institution_id, credentialId: cr.id, via: 'holder' },
+        'card storage lookup failed',
+      );
+      throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Cards are not available right now');
+    }
+    // The URL is a bearer credential: only in the Location header, never logged.
+    this.ctx.log?.info(
+      { event: 'card.served', institutionId: cr.institution_id, credentialId: cr.id, format: ext, via: 'holder' },
+      'card redirect issued',
+    );
+    return reply.redirect(url, 302);
   }
 }
 
@@ -155,4 +246,11 @@ export function registerHolderView(api: FastifyInstance, svc: PublicLookupServic
     void reply.header('Referrer-Policy', 'no-referrer');
     return svc.holderView(String((req.params as { holderToken?: unknown }).holderToken ?? ''), req);
   });
+  for (const ext of ['png', 'pdf'] as const) {
+    api.get(`/holder/:holderToken/card.${ext}`, async (req, reply) => {
+      void reply.header('Cache-Control', 'no-store');
+      void reply.header('Referrer-Policy', 'no-referrer');
+      return svc.holderCard(String((req.params as { holderToken?: unknown }).holderToken ?? ''), ext, req, reply);
+    });
+  }
 }

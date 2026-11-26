@@ -110,7 +110,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: card.render enqueue after issue/reissue commit (failure logged, never fails issuance), card.png/pdf 302 to 60 s signed URL after core integrity re-check, ObjectStorage.exists, one shared pg-boss producer connection, ADR 0029. Delivery job enqueue left to T-041.
 - [x] T-041 [owner: igaro-worker] [deps: T-039, T-033] Holder delivery email with private /h/:token link
   - Done: email.deliver job (sealed AES-256-GCM payload under DELIVERY_PAYLOAD_KEY, singleton key per credential, retry with backoff, job deleted on completion), enqueued by the API after issue/reissue commit (failure logged, never fails issuance), ADR 0030.
-- [ ] T-042 [owner: igaro-web] [deps: T-033, T-040, T-035] Private holder page /h/:token (card and credential file download)
+- [x] T-042 [owner: igaro-web] [deps: T-033, T-040, T-035] Private holder page /h/:token (card and credential file download)
+  - Done: holder-token card.png/pdf endpoints (ADR 0031), /h/:token page and card proxy (ADR 0032); review ship, 0 Critical/High, M1/M2 fixed. Web typecheck/lint/tests were not run after the M1/M2 fix (npm blocked in session). Stray empty dir apps/web/src/app/h/[token]/card.[ext] needs deleting.
 - [ ] T-043 [owner: igaro-api] [deps: T-025, T-011] POST /credentials/import: CSV + photo ZIP validate/preview and batch job creation
 - [ ] T-044 [owner: igaro-worker] [deps: T-043, T-041] CSV + ZIP import batch job (500 holders with photos, issue, email each)
 - [ ] T-045 [owner: igaro-web] [deps: T-027, T-035, T-016, T-017] Dashboard: branding, keys, holders, types, issue form, lifecycle actions, credential list, status counts, audit view
