@@ -23,6 +23,12 @@ import { CalendarTimestamper, NoopTimestamper } from './ots.js';
 import { CARD_RENDER_QUEUE, CARD_RENDER_QUEUE_OPTIONS, InvalidCardRenderJobError } from './card-render-job.js';
 import { ChromeCardRenderer, runCardRender, type CardRenderDeps } from './card-render.js';
 import { S3WorkerStorage } from './card-storage.js';
+import {
+  HOLDER_DELIVERY_QUEUE,
+  HOLDER_DELIVERY_QUEUE_OPTIONS,
+  InvalidHolderDeliveryJobError,
+} from './holder-delivery-job.js';
+import { runHolderDelivery, type HolderDeliveryDeps } from './holder-delivery.js';
 
 export interface WorkerHandle {
   boss: PgBoss;
@@ -40,6 +46,8 @@ export interface StartWorkerOptions {
   auditHead?: Omit<AuditHeadDeps, 'logger'> & { cron?: string };
   /** card.render (T-039). Omitted = the job is not registered. */
   cardRender?: Omit<CardRenderDeps, 'logger'>;
+  /** email.deliver (T-041, ADR 0030). Uses `mail` for transport, sender and web URL. Omitted = the job is not registered. */
+  holderDelivery?: Pick<HolderDeliveryDeps, 'pool' | 'key' | 'assumeRole'>;
 }
 
 export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandle> {
@@ -121,12 +129,44 @@ export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandl
     logger.info({ queue: CARD_RENDER_QUEUE }, 'card render job registered');
   }
 
+  if (opts.holderDelivery) {
+    const deps: HolderDeliveryDeps = {
+      ...opts.holderDelivery,
+      transport: opts.mail.transport,
+      from: opts.mail.from,
+      webBaseUrl: opts.mail.webBaseUrl,
+      logger,
+    };
+    await boss.createQueue(HOLDER_DELIVERY_QUEUE, HOLDER_DELIVERY_QUEUE_OPTIONS);
+    await boss.work<unknown>(HOLDER_DELIVERY_QUEUE, { batchSize: 1, pollingIntervalSeconds: opts.pollingIntervalSeconds ?? 2 }, async (jobs) => {
+      for (const job of jobs) {
+        try {
+          // Only ids and outcome are logged: never job.data (sealed token and recipient).
+          const outcome = await runHolderDelivery(deps, job.data);
+          logger.info({ jobId: job.id, queue: HOLDER_DELIVERY_QUEUE, outcome }, 'holder delivery job done');
+          // The sealed token must not linger: remove the finished job now (deleteAfterSeconds is the backstop).
+          await boss.deleteJob(HOLDER_DELIVERY_QUEUE, job.id).catch(() => undefined);
+        } catch (err) {
+          if (err instanceof InvalidHolderDeliveryJobError) {
+            // A retry cannot fix a malformed, tampered or wrongly keyed payload: drop it.
+            logger.error({ jobId: job.id, queue: HOLDER_DELIVERY_QUEUE }, 'invalid job dropped');
+            continue;
+          }
+          logger.warn({ jobId: job.id, queue: HOLDER_DELIVERY_QUEUE, retryCount: job.retryCount, err }, 'holder delivery job failed, will retry');
+          throw err;
+        }
+      }
+    });
+    logger.info({ queue: HOLDER_DELIVERY_QUEUE }, 'holder delivery job registered');
+  }
+
   return {
     boss,
     stop: async () => {
       await boss.stop({ graceful: true, timeout: 10000 });
       await opts.auditHead?.pool.end();
       await opts.cardRender?.pool.end();
+      await opts.holderDelivery?.pool.end();
       logger.info('worker stopped');
     },
   };
@@ -146,11 +186,14 @@ export function startWorkerFromConfig(config: WorkerConfig, logger: Logger): Pro
   if (!ah) logger.warn('AUDIT_HEAD_SIGNING_KEY not set: audit.dailyHead is not registered');
   const cr = config.cardRender;
   if (!cr) logger.warn('S3_* or CHROME_PATH not set: card.render is not registered');
+  const hd = config.holderDelivery;
+  if (!hd) logger.warn('DELIVERY_PAYLOAD_KEY not set: email.deliver is not registered');
   return startWorker({
     databaseUrl: config.databaseUrl,
     schema: config.pgbossSchema,
     logger,
     mail: { transport, from: config.smtp.from, webBaseUrl: config.webBaseUrl },
+    ...(hd ? { holderDelivery: { pool: new pg.Pool({ connectionString: config.databaseUrl, max: 2 }), key: hd.key } } : {}),
     ...(cr
       ? {
           cardRender: {

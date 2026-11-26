@@ -44,6 +44,11 @@ export interface Config {
    * keeps old entries. Empty = signatures are reported as unverified, not failed.
    */
   auditHeadPublicKeys: Record<string, string>;
+  /**
+   * DELIVERY_PAYLOAD_KEY (T-041, ADR 0030): 32-byte AES-256-GCM key that seals the holder token and address in the
+   * email.deliver job. Same value as the worker's. Not MASTER_KEY. Undefined = no holder delivery email is queued.
+   */
+  deliveryPayloadKey?: Buffer | undefined;
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
@@ -345,6 +350,23 @@ export function loadConfig(env: Env = process.env): Config {
     accountMail = { driver: 'pgboss', databaseUrl: queueUrl, schema };
   }
 
+  // Holder delivery key (ADR 0030): distinct from MASTER_KEY, required in production once the queue is on.
+  const deliveryRaw = env.DELIVERY_PAYLOAD_KEY;
+  let deliveryPayloadKey: Buffer | undefined;
+  if (deliveryRaw !== undefined && deliveryRaw !== '') {
+    if (PLACEHOLDER.test(deliveryRaw)) throw new ConfigError('DELIVERY_PAYLOAD_KEY looks like a placeholder');
+    const buf = Buffer.from(deliveryRaw, 'base64');
+    if (buf.length !== 32 || buf.toString('base64') !== deliveryRaw.trim()) {
+      throw new ConfigError('DELIVERY_PAYLOAD_KEY must be base64 encoding of exactly 32 bytes');
+    }
+    if (env.MASTER_KEY && env.MASTER_KEY.trim() === deliveryRaw.trim()) {
+      throw new ConfigError('DELIVERY_PAYLOAD_KEY must differ from MASTER_KEY');
+    }
+    deliveryPayloadKey = buf;
+  } else if (nodeEnv === 'production' && accountMail.driver === 'pgboss') {
+    throw new ConfigError('DELIVERY_PAYLOAD_KEY is required in production when ACCOUNT_MAIL_QUEUE=pgboss');
+  }
+
   const logoMaxBytes = parseCount(env.LOGO_MAX_BYTES, 'LOGO_MAX_BYTES', 1024 * 1024, 10 * 1024 * 1024);
 
   const photoMaxBytes = parseCount(env.PHOTO_MAX_BYTES, 'PHOTO_MAX_BYTES', 2 * 1024 * 1024, 10 * 1024 * 1024);
@@ -367,6 +389,7 @@ export function loadConfig(env: Env = process.env): Config {
     logoMaxBytes,
     photoMaxBytes,
     accountMail,
+    deliveryPayloadKey,
     auditHeadPublicKeys,
     session,
     tokenTtl,

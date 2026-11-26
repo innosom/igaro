@@ -8,6 +8,8 @@ const SENSITIVE = [
   'data',
   'payload',
   'link',
+  'sealed',
+  'holderToken',
   'text',
   'html',
   'password',

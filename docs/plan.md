@@ -108,7 +108,8 @@ Acceptance criteria per milestone: `docs/acceptance/`.
   - Done: apps/worker card.render job, worker-role column grants migration, ADR 0028; review ship, 0 Critical/High; M1 (no sandbox in production refused), L1 (logo prefix), L4 (expiry 300 s) fixed. Follow-ups: scoped worker S3 keys (M2); T-040 should verify the signature before serving cards (L3).
 - [x] T-040 [owner: igaro-api] [deps: T-039] card.png and card.pdf endpoints, enqueue render and delivery jobs after issuance
   - Done: card.render enqueue after issue/reissue commit (failure logged, never fails issuance), card.png/pdf 302 to 60 s signed URL after core integrity re-check, ObjectStorage.exists, one shared pg-boss producer connection, ADR 0029. Delivery job enqueue left to T-041.
-- [ ] T-041 [owner: igaro-worker] [deps: T-039, T-033] Holder delivery email with private /h/:token link
+- [x] T-041 [owner: igaro-worker] [deps: T-039, T-033] Holder delivery email with private /h/:token link
+  - Done: email.deliver job (sealed AES-256-GCM payload under DELIVERY_PAYLOAD_KEY, singleton key per credential, retry with backoff, job deleted on completion), enqueued by the API after issue/reissue commit (failure logged, never fails issuance), ADR 0030.
 - [ ] T-042 [owner: igaro-web] [deps: T-033, T-040, T-035] Private holder page /h/:token (card and credential file download)
 - [ ] T-043 [owner: igaro-api] [deps: T-025, T-011] POST /credentials/import: CSV + photo ZIP validate/preview and batch job creation
 - [ ] T-044 [owner: igaro-worker] [deps: T-043, T-041] CSV + ZIP import batch job (500 holders with photos, issue, email each)

@@ -10,6 +10,7 @@ import { LifecycleError, planTransition, type CredentialStatus, type LifecycleAc
 import { appendAudit } from './audit.js';
 import { enqueueCardAfterCommit } from './card-endpoints.js';
 import type { CardRenderQueue } from './notifications.js';
+import { enqueueDeliveryAfterCommit, type HolderDeliveryHook } from './holder-delivery.js';
 import type { AuthSession } from './auth.js';
 import {
   BAD_TEXT_RE,
@@ -267,6 +268,7 @@ export function registerCredentialLifecycle(
   svc: CredentialLifecycleService,
   log: FastifyBaseLogger,
   cardRender?: CardRenderQueue,
+  delivery?: HolderDeliveryHook,
 ): void {
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
   type P = { Params: { id: string } };
@@ -296,6 +298,8 @@ export function registerCredentialLifecycle(
     );
     // After commit: render the NEW credential's card. Failure is logged and never fails the reissue.
     await enqueueCardAfterCommit(cardRender, log, { institutionId: scope.institutionId, credentialId: out.credential.id });
+    // The reissued credential has its own holder token: mail the new link (failure logged, never fails the reissue).
+    await enqueueDeliveryAfterCommit(delivery, log, scope, out.credential);
     return reply.status(201).send(out);
   });
 }

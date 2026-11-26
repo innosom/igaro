@@ -55,6 +55,11 @@ export interface WorkerConfig {
   cardRender:
     | { s3: S3Config; chromePath: string; chromeNoSandbox: boolean; verifyBaseUrl: string }
     | undefined;
+  /**
+   * email.deliver (T-041, ADR 0030). `undefined` = job not registered (allowed outside production). The key seals the
+   * holder token and address in the job (same value as the API's DELIVERY_PAYLOAD_KEY); it is not MASTER_KEY.
+   */
+  holderDelivery: { key: Buffer } | undefined;
 }
 
 type Env = Record<string, string | undefined>;
@@ -141,7 +146,29 @@ export function loadWorkerConfig(env: Env = process.env): WorkerConfig {
     auditHead: parseAuditHead(env, nodeEnv),
     otsCalendars: parseOtsCalendars(env, nodeEnv),
     cardRender: parseCardRender(env, nodeEnv),
+    holderDelivery: parseHolderDelivery(env, nodeEnv),
   };
+}
+
+function parseHolderDelivery(env: Env, nodeEnv: string): WorkerConfig['holderDelivery'] {
+  const raw = env.DELIVERY_PAYLOAD_KEY;
+  if (!raw) {
+    if (nodeEnv === 'production') throw new ConfigError('DELIVERY_PAYLOAD_KEY is required in production');
+    return undefined;
+  }
+  if (PLACEHOLDER.test(raw)) throw new ConfigError('DELIVERY_PAYLOAD_KEY looks like a placeholder');
+  let key: Buffer;
+  try {
+    key = parseMasterKey(raw);
+  } catch {
+    throw new ConfigError('DELIVERY_PAYLOAD_KEY must decode to 32 bytes');
+  }
+  // The worker never reads MASTER_KEY (ADR 0019); the API refuses a delivery key equal to it.
+  // Reads use the igaro_worker column grants.
+  if (nodeEnv === 'production' && !env.WORKER_DATABASE_URL) {
+    throw new ConfigError('WORKER_DATABASE_URL (igaro_worker login) is required in production for email.deliver');
+  }
+  return { key };
 }
 
 function parseS3(env: Env, nodeEnv: string): S3Config | undefined {

@@ -39,6 +39,31 @@ export class MemoryCardRenderQueue implements CardRenderQueue {
   }
 }
 
+/**
+ * Holder delivery email jobs (T-041, ADR 0030). The job carries the RAW holder token and the recipient: the pg-boss
+ * implementation seals them (AES-256-GCM) before they reach the queue. Implementations must never log them.
+ */
+export interface HolderDeliveryQueue {
+  enqueue(job: { institutionId: string; credentialId: string; to: string; holderToken: string }): Promise<void>;
+}
+
+/** Drops every job (pg-boss or DELIVERY_PAYLOAD_KEY not configured): the holder simply gets no email. */
+export class NoopHolderDeliveryQueue implements HolderDeliveryQueue {
+  async enqueue(): Promise<void> {
+    // intentionally empty
+  }
+}
+
+/** Records jobs in memory for tests; `fail` makes enqueue reject. */
+export class MemoryHolderDeliveryQueue implements HolderDeliveryQueue {
+  readonly jobs: { institutionId: string; credentialId: string; to: string; holderToken: string }[] = [];
+  fail = false;
+  async enqueue(job: { institutionId: string; credentialId: string; to: string; holderToken: string }): Promise<void> {
+    if (this.fail) throw new Error('queue unavailable');
+    this.jobs.push({ ...job });
+  }
+}
+
 /** Records jobs in memory for tests. */
 export class MemoryAccountMailQueue implements AccountMailQueue {
   readonly jobs: AccountMailJob[] = [];
