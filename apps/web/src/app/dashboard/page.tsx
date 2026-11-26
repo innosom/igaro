@@ -1,8 +1,5 @@
-import type { Metadata } from 'next';
-import { DashboardStub } from './stub';
-
-export const metadata: Metadata = { title: 'Dashboard' };
+import { Overview } from './overview';
 
 export default function DashboardPage() {
-  return <DashboardStub />;
+  return <Overview />;
 }

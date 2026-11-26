@@ -38,7 +38,8 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     }
     const doFetch =opts.fetch ?? globalThis.fetch.bind(globalThis);
     const headers: Record<string, string> = { Accept: 'application/json' };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
     if (method !== 'GET' && method !== 'HEAD' && csrfToken) headers['X-CSRF-Token'] = csrfToken;
 
     let res: Response;
@@ -46,7 +47,7 @@ export function createApiClient(opts: ApiClientOptions = {}) {
       res = await doFetch(`${base}${path}`, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
         credentials: 'same-origin',
         cache: 'no-store',
         referrerPolicy: 'no-referrer',
@@ -87,6 +88,13 @@ export function createApiClient(opts: ApiClientOptions = {}) {
         csrfToken = null;
       }
     },
+    /** Generic same-origin calls for the dashboard. Paths are relative to /api/v1. */
+    get: <T>(path: string) => request<T>('GET', path) as Promise<T>,
+    post: <T>(path: string, body: unknown = {}) => request<T>('POST', path, body) as Promise<T>,
+    patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body) as Promise<T>,
+    del: (path: string) => request<undefined>('DELETE', path).then(() => undefined),
+    /** Multipart upload; the browser sets the boundary, so no Content-Type is sent. */
+    upload: <T>(path: string, form: FormData) => request<T>('POST', path, form) as Promise<T>,
     async acceptInvite(token: string, password: string, name?: string): Promise<void> {
       await request('POST', '/auth/invites/accept', {
         token,
