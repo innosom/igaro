@@ -5,6 +5,8 @@ import { ACCOUNT_MAIL_QUEUE } from './account-mail-job.js';
 import { ACCOUNT_MAIL_QUEUE_OPTIONS, PgBossAccountMailQueue } from './account-mail-producer.js';
 import { HOLDER_DELIVERY_QUEUE, HOLDER_DELIVERY_QUEUE_OPTIONS } from './holder-delivery-job.js';
 import { PgBossHolderDeliveryQueue } from './holder-delivery-producer.js';
+import { IMPORT_BATCH_QUEUE, IMPORT_BATCH_QUEUE_OPTIONS } from './import-batch-job.js';
+import { PgBossImportBatchQueue } from './import-batch-producer.js';
 import {
   CARD_RENDER_QUEUE,
   CARD_RENDER_QUEUE_OPTIONS,
@@ -29,6 +31,7 @@ export class PgBossCardRenderQueue implements CardRenderQueue {
 export interface ConnectedProducerQueues {
   accountMail: PgBossAccountMailQueue;
   cardRender: PgBossCardRenderQueue;
+  importBatch: PgBossImportBatchQueue;
   /** Present only when a delivery payload key was given (ADR 0030). */
   holderDelivery: PgBossHolderDeliveryQueue | undefined;
   stop(): Promise<void>;
@@ -54,10 +57,12 @@ export async function connectProducerQueues(opts: {
   await boss.start();
   await boss.createQueue(ACCOUNT_MAIL_QUEUE, ACCOUNT_MAIL_QUEUE_OPTIONS);
   await boss.createQueue(CARD_RENDER_QUEUE, CARD_RENDER_QUEUE_OPTIONS);
+  await boss.createQueue(IMPORT_BATCH_QUEUE, IMPORT_BATCH_QUEUE_OPTIONS);
   if (opts.deliveryKey) await boss.createQueue(HOLDER_DELIVERY_QUEUE, HOLDER_DELIVERY_QUEUE_OPTIONS);
   return {
     accountMail: new PgBossAccountMailQueue(boss),
     cardRender: new PgBossCardRenderQueue(boss),
+    importBatch: new PgBossImportBatchQueue(boss),
     holderDelivery: opts.deliveryKey ? new PgBossHolderDeliveryQueue(boss, opts.deliveryKey) : undefined,
     stop: () => boss.stop({ graceful: true, timeout: 5000 }),
   };
