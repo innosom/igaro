@@ -5,6 +5,8 @@
 .env.*
 .next
 .next/
+next-env.d.ts
+*.tsbuildinfo
 .turbo
 .turbo/
 Thumbs.db
