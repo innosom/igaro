@@ -17,6 +17,7 @@
   },
   "scripts": {
     "start": "node dist/main.js",
+    "pgboss:setup": "tsc -p tsconfig.json && node dist/pgboss-setup-cli.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",

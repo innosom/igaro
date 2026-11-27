@@ -1,6 +1,6 @@
 // Integration: real pg-boss on Postgres ($DATABASE_URL) + an in-process fake SMTP server (Mailpit is not
 // needed). Uses a unique pg-boss schema per run and drops it afterwards. Skipped without DATABASE_URL.
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { SMTPServer } from 'smtp-server';
@@ -30,6 +30,10 @@ async function waitFor(cond: () => boolean | Promise<boolean>, ms = 20000): Prom
 
 describe.skipIf(!url)('account mail via pg-boss (needs Postgres at DATABASE_URL)', () => {
   const schema = `pgboss_t011_${randomBytes(4).toString('hex')}`;
+  // A schema with no worker: jobs stay queued, so the stored row can be inspected (T-051).
+  const idleSchema = `pgboss_t011i_${randomBytes(4).toString('hex')}`;
+  const key = randomBytes(32);
+  let idleProducer: Awaited<ReturnType<typeof connectAccountMailQueue>>;
   const messages: string[] = [];
   const logLines: string[] = [];
   let smtp: SMTPServer;
@@ -68,15 +72,19 @@ describe.skipIf(!url)('account mail via pg-boss (needs Postgres at DATABASE_URL)
         transport: createTransport({ host: '127.0.0.1', port: smtpPort, secure: false, tls: { rejectUnauthorized: false }, ignoreTLS: true }),
         from: 'iGARO <no-reply@igaro.test>',
         webBaseUrl: 'https://app.igaro.test',
+        key,
       },
     });
-    producer = await connectAccountMailQueue({ connectionString: url as string, schema });
+    producer = await connectAccountMailQueue({ connectionString: url as string, schema, key });
+    idleProducer = await connectAccountMailQueue({ connectionString: url as string, schema: idleSchema, key });
   }, 60000);
 
   afterAll(async () => {
     await producer?.stop();
+    await idleProducer?.stop();
     await worker?.stop();
     await admin?.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await admin?.query(`DROP SCHEMA IF EXISTS "${idleSchema}" CASCADE`);
     await admin?.end();
     await new Promise<void>((r) => smtp?.close(() => r()));
   }, 60000);
@@ -86,7 +94,7 @@ describe.skipIf(!url)('account mail via pg-boss (needs Postgres at DATABASE_URL)
     const t2 = token();
     const exp = new Date(Date.now() + 3600_000);
     const jobs: AccountMailJob[] = [
-      { kind: 'INVITE', to: 'new-admin@school.test', token: t1, expiresAt: exp, institutionId: randomBytes(4).toString('hex') },
+      { kind: 'INVITE', to: 'new-admin@school.test', token: t1, expiresAt: exp, institutionId: randomUUID() },
       { kind: 'PASSWORD_RESET', to: 'user@school.test', token: t2, expiresAt: exp },
     ];
     for (const j of jobs) await producer.queue.enqueue(j);
@@ -106,6 +114,34 @@ describe.skipIf(!url)('account mail via pg-boss (needs Postgres at DATABASE_URL)
       [ACCOUNT_MAIL_QUEUE],
     );
     expect((pending.rows[0] as { n: number }).n).toBe(0);
+  }, 40000);
+
+  it('a queued job row holds no token and no address, in any column (T-051)', async () => {
+    const t1 = token();
+    const t2 = token();
+    const exp = new Date(Date.now() + 3600_000);
+    await idleProducer.queue.enqueue({ kind: 'INVITE', to: 'row-check@school.test', token: t1, expiresAt: exp, institutionId: '33333333-3333-4333-8333-333333333333' });
+    await idleProducer.queue.enqueue({ kind: 'PASSWORD_RESET', to: 'row-check2@school.test', token: t2, expiresAt: exp });
+    // Whole rows as text: data, output, every column.
+    const rows = await admin.query(`SELECT j::text AS row, data FROM "${idleSchema}".job j WHERE name = $1`, [ACCOUNT_MAIL_QUEUE]);
+    expect(rows.rows).toHaveLength(2);
+    for (const r of rows.rows as { row: string; data: Record<string, unknown> }[]) {
+      expect(r.row).not.toContain(t1);
+      expect(r.row).not.toContain(t2);
+      expect(r.row).not.toContain('school.test');
+      expect(Object.keys(r.data).sort()).toEqual(
+        r.data.kind === 'INVITE' ? ['expiresAt', 'institutionId', 'kind', 'ref', 'sealed'] : ['expiresAt', 'kind', 'ref', 'sealed'],
+      );
+    }
+  }, 40000);
+
+  it('a job from an old clear-text producer is dropped, not mailed', async () => {
+    const before = messages.length;
+    const t = token();
+    const boss = (worker as WorkerHandle).boss;
+    await boss.send(ACCOUNT_MAIL_QUEUE, { kind: 'PASSWORD_RESET', to: 'legacy@school.test', token: t, expiresAt: new Date(Date.now() + 3600_000).toISOString() });
+    await waitFor(() => logLines.some((l) => l.includes('invalid job dropped')));
+    expect(messages.slice(before).map(decodeQp).join('\n')).not.toContain(t);
   }, 40000);
 
   it('stores a short retention and deleteAfter on the job rows', async () => {

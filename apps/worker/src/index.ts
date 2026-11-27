@@ -7,6 +7,8 @@ export {
   retentionFor,
   ACCOUNT_MAIL_QUEUE_OPTIONS,
 } from './account-mail-producer.js';
+export { setupPgbossSchema, grantSql, skeletonSql, PGBOSS_QUEUES, type PgbossSetupOptions } from './pgboss-setup.js';
+export { parsePgbossSchemaMode, externalSchemaOptions, type PgbossSchemaMode } from './pgboss-mode.js';
 export { createAccountMailHandler, renderAccountMail, buildLink } from './account-mail.js';
 export { loadWorkerConfig, ConfigError, type WorkerConfig } from './config.js';
 export { startWorker, startWorkerFromConfig } from './worker.js';

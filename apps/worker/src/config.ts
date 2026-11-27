@@ -3,6 +3,7 @@
 import { parseMasterKey } from '@igaro/core';
 import { AUDIT_DAILY_HEAD_CRON } from './audit-head.js';
 import { parseCalendarUrls } from './ots.js';
+import { parsePgbossSchemaMode, type PgbossSchemaMode } from './pgboss-mode.js';
 import type { S3Config } from './card-storage.js';
 import { existsSync } from 'node:fs';
 
@@ -28,6 +29,11 @@ export interface WorkerConfig {
   databaseUrl: string;
   /** pg-boss schema. Holds only queue tables, never tenant data. */
   pgbossSchema: string;
+  /**
+   * PGBOSS_SCHEMA_MODE (ADR 0038). `external` (production default): the schema and queues were provisioned by the owner
+   * with `pnpm db:pgboss`, this process never creates or migrates them. `auto` (elsewhere): pg-boss installs itself.
+   */
+  pgbossSchemaMode: PgbossSchemaMode;
   smtp: {
     host: string;
     port: number;
@@ -141,6 +147,7 @@ export function loadWorkerConfig(env: Env = process.env): WorkerConfig {
     logLevel: env.LOG_LEVEL ?? 'info',
     databaseUrl: parseDbUrl(rawDb, dbName, env),
     pgbossSchema: schema,
+    pgbossSchemaMode: parseSchemaMode(env.PGBOSS_SCHEMA_MODE, nodeEnv),
     smtp: {
       host,
       port,
@@ -156,6 +163,14 @@ export function loadWorkerConfig(env: Env = process.env): WorkerConfig {
     holderDelivery: parseHolderDelivery(env, nodeEnv),
     importBatch: parseImportBatch(env, nodeEnv),
   };
+}
+
+function parseSchemaMode(raw: string | undefined, nodeEnv: string): PgbossSchemaMode {
+  try {
+    return parsePgbossSchemaMode(raw, nodeEnv);
+  } catch {
+    throw new ConfigError('PGBOSS_SCHEMA_MODE must be auto or external');
+  }
 }
 
 function parseImportBatch(env: Env, nodeEnv: string): WorkerConfig['importBatch'] {

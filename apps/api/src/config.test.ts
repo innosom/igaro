@@ -37,13 +37,19 @@ describe('loadConfig', () => {
       driver: 'pgboss',
       databaseUrl: good.APP_DATABASE_URL,
       schema: undefined,
+      schemaMode: 'auto',
     });
     const w = 'postgresql://igaro_worker:pw@127.0.0.1:5432/igaro';
     expect(
       loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: w, PGBOSS_SCHEMA: 'q' })
         .accountMail,
-    ).toEqual({ driver: 'pgboss', databaseUrl: w, schema: 'q' });
+    ).toEqual({ driver: 'pgboss', databaseUrl: w, schema: 'q', schemaMode: 'auto' });
+    // ADR 0038: an explicit mode wins.
+    expect(
+      loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA_MODE: 'external' }).accountMail,
+    ).toMatchObject({ schemaMode: 'external' });
     for (const bad of [
+      { ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA_MODE: 'yes' },
       { ACCOUNT_MAIL_QUEUE: 'redis' },
       { ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA: 'x;drop' },
       { ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: 'not a url' },
