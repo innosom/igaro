@@ -109,11 +109,17 @@ describe.skipIf(!url)('account mail via pg-boss (needs Postgres at DATABASE_URL)
 
     // Completed jobs (and so the raw tokens) leave the table shortly after completion (deleteAfterSeconds 60).
     // Until the maintenance sweep runs they are in state "completed"; assert that none is still waiting.
-    const pending = await admin.query(
-      `SELECT count(*)::int AS n FROM "${schema}".job WHERE name = $1 AND state < 'completed'`,
-      [ACCOUNT_MAIL_QUEUE],
-    );
-    expect((pending.rows[0] as { n: number }).n).toBe(0);
+    // The SMTP message arrives while the handler is still running, so the job can briefly still be
+    // "active": poll until none is waiting or active (a job stuck pending still fails the test).
+    const countPending = async (): Promise<number> => {
+      const pending = await admin.query(
+        `SELECT count(*)::int AS n FROM "${schema}".job WHERE name = $1 AND state < 'completed'`,
+        [ACCOUNT_MAIL_QUEUE],
+      );
+      return (pending.rows[0] as { n: number }).n;
+    };
+    await waitFor(async () => (await countPending()) === 0, 10000).catch(() => undefined);
+    expect(await countPending()).toBe(0);
   }, 40000);
 
   it('a queued job row holds no token and no address, in any column (T-051)', async () => {

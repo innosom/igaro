@@ -159,7 +159,7 @@ export class PgRateLimiter implements Limiter {
     const epoch = this.resetEpoch;
     try {
       const at = this.o.now ? new Date(this.o.now()) : null;
-      const r = await this.o.db.pool.query<{ count: number; wait: number }>(
+      const r = await this.o.db.limiterPool.query<{ count: number; wait: number }>(
         withTimeout(
           { text: CONSUME_SQL, values: [nsKey, this.o.windowSeconds, this.o.max, at] },
           this.o.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS,
@@ -195,7 +195,7 @@ export class PgRateLimiter implements Limiter {
     this.resetEpoch += 1;
     this.blocked.delete(this.k(key));
     try {
-      await this.o.db.pool.query(
+      await this.o.db.limiterPool.query(
         withTimeout(
           { text: 'DELETE FROM rate_limit_counters WHERE "key" = $1', values: [this.k(key)] },
           this.o.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS,
@@ -212,7 +212,7 @@ export class PgRateLimiter implements Limiter {
   /** Keeps the table bounded: now and then delete one batch of long-expired windows. */
   private maybeCleanup(): void {
     if (Math.random() >= (this.o.cleanupRate ?? 0.02)) return;
-    const pool = this.o.db.pool;
+    const pool = this.o.db.limiterPool;
     if (cleaning.has(pool)) return; // single flight per process
     cleaning.add(pool);
     void pool

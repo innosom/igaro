@@ -115,9 +115,9 @@ describe.skipIf(!url)('Postgres rate limiter (needs Postgres)', () => {
     const spyQueries = () => {
       const texts: string[] = [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const orig = db.pool.query.bind(db.pool) as any;
+      const orig = db.limiterPool.query.bind(db.limiterPool) as any;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const spy = vi.spyOn(db.pool, 'query').mockImplementation(((q: any, ...rest: unknown[]) => {
+      const spy = vi.spyOn(db.limiterPool, 'query').mockImplementation(((q: any, ...rest: unknown[]) => {
         texts.push(typeof q === 'string' ? q : q.text);
         return orig(q, ...rest);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -192,12 +192,43 @@ describe.skipIf(!url)('Postgres rate limiter (needs Postgres)', () => {
       }
     });
 
+    it('the limiter pool sets server-side timeouts and Postgres cancels a stuck statement (T-055)', async () => {
+      const c = await db.limiterPool.connect();
+      try {
+        const r = await c.query(`SELECT current_setting('statement_timeout') AS st, current_setting('lock_timeout') AS lt`);
+        expect(r.rows[0]).toEqual({ st: '2s', lt: '2s' });
+      } finally {
+        c.release();
+      }
+      const short = new Db({
+        connectionString: url!,
+        max: 2,
+        limiterTimeoutMs: 300,
+        poolConfig: { options: `-c search_path=${schema} -c role=igaro_app` },
+      });
+      await owner.query('BEGIN');
+      try {
+        await owner.query('LOCK TABLE rate_limit_counters IN ACCESS EXCLUSIVE MODE');
+        const l = new PgRateLimiter({ db: short, family: 'c7', max: 1, windowSeconds: 60, onError: 'closed', queryTimeoutMs: 60_000 });
+        const started = Date.now();
+        // The client timeout is far away: only the server-side lock_timeout can end this.
+        const err = await l.consume('a').catch((e: unknown) => e);
+        expect((err as AppError).statusCode).toBe(503);
+        expect(Date.now() - started).toBeLessThan(3000);
+        const waiting = await owner.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%rate_limit_counters%' AND pid <> pg_backend_pid()`);
+        expect(waiting.rows[0].n).toBe(0); // the server dropped the statement, it is not left waiting
+      } finally {
+        await owner.query('ROLLBACK');
+        await short.close();
+      }
+    });
+
     it('runs at most one cleanup at a time per process', async () => {
       const seen: string[] = [];
-      const orig = db.pool.query.bind(db.pool) as unknown as (...a: unknown[]) => Promise<unknown>;
+      const orig = db.limiterPool.query.bind(db.limiterPool) as unknown as (...a: unknown[]) => Promise<unknown>;
       // Make cleanup slow so the overlap is certain.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.spyOn(db.pool, 'query').mockImplementation(((q: any, ...rest: unknown[]) => {
+      vi.spyOn(db.limiterPool, 'query').mockImplementation(((q: any, ...rest: unknown[]) => {
         const text = typeof q === 'string' ? q : q.text;
         seen.push(text);
         const p = orig(q, ...rest);
