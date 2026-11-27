@@ -3,6 +3,7 @@
 import { PgBoss } from 'pg-boss';
 import { ACCOUNT_MAIL_QUEUE } from './account-mail-job.js';
 import { ACCOUNT_MAIL_QUEUE_OPTIONS, PgBossAccountMailQueue } from './account-mail-producer.js';
+import { externalSchemaOptions, type PgbossSchemaMode } from './pgboss-mode.js';
 import { HOLDER_DELIVERY_QUEUE, HOLDER_DELIVERY_QUEUE_OPTIONS } from './holder-delivery-job.js';
 import { PgBossHolderDeliveryQueue } from './holder-delivery-producer.js';
 import { IMPORT_BATCH_QUEUE, IMPORT_BATCH_QUEUE_OPTIONS } from './import-batch-job.js';
@@ -29,7 +30,8 @@ export class PgBossCardRenderQueue implements CardRenderQueue {
 }
 
 export interface ConnectedProducerQueues {
-  accountMail: PgBossAccountMailQueue;
+  /** Present only when a delivery payload key was given: invite and reset mail are sealed with it (ADR 0038). */
+  accountMail: PgBossAccountMailQueue | undefined;
   cardRender: PgBossCardRenderQueue;
   importBatch: PgBossImportBatchQueue;
   /** Present only when a delivery payload key was given (ADR 0030). */
@@ -43,10 +45,15 @@ export async function connectProducerQueues(opts: {
   schema?: string;
   /** DELIVERY_PAYLOAD_KEY (32 bytes). Without it the email.deliver queue is not created and no delivery is queued. */
   deliveryKey?: Buffer | undefined;
+  /** `external` (ADR 0038): the schema and queues were provisioned by the owner; this connection creates nothing. */
+  schemaMode?: PgbossSchemaMode;
 }): Promise<ConnectedProducerQueues> {
+  const mode = opts.schemaMode ?? 'auto';
   const boss = new PgBoss({
     connectionString: opts.connectionString,
     ...(opts.schema ? { schema: opts.schema } : {}),
+    ...externalSchemaOptions(mode),
+    ...(mode === 'external' ? { registerInstance: false } : {}),
     supervise: false,
     schedule: false,
     max: 2,
@@ -55,12 +62,14 @@ export async function connectProducerQueues(opts: {
     console.error(JSON.stringify({ msg: 'queue producer error', code: err.code }));
   });
   await boss.start();
-  await boss.createQueue(ACCOUNT_MAIL_QUEUE, ACCOUNT_MAIL_QUEUE_OPTIONS);
-  await boss.createQueue(CARD_RENDER_QUEUE, CARD_RENDER_QUEUE_OPTIONS);
-  await boss.createQueue(IMPORT_BATCH_QUEUE, IMPORT_BATCH_QUEUE_OPTIONS);
-  if (opts.deliveryKey) await boss.createQueue(HOLDER_DELIVERY_QUEUE, HOLDER_DELIVERY_QUEUE_OPTIONS);
+  if (mode === 'auto') {
+    await boss.createQueue(ACCOUNT_MAIL_QUEUE, ACCOUNT_MAIL_QUEUE_OPTIONS);
+    await boss.createQueue(CARD_RENDER_QUEUE, CARD_RENDER_QUEUE_OPTIONS);
+    await boss.createQueue(IMPORT_BATCH_QUEUE, IMPORT_BATCH_QUEUE_OPTIONS);
+    if (opts.deliveryKey) await boss.createQueue(HOLDER_DELIVERY_QUEUE, HOLDER_DELIVERY_QUEUE_OPTIONS);
+  }
   return {
-    accountMail: new PgBossAccountMailQueue(boss),
+    accountMail: opts.deliveryKey ? new PgBossAccountMailQueue(boss, opts.deliveryKey) : undefined,
     cardRender: new PgBossCardRenderQueue(boss),
     importBatch: new PgBossImportBatchQueue(boss),
     holderDelivery: opts.deliveryKey ? new PgBossHolderDeliveryQueue(boss, opts.deliveryKey) : undefined,

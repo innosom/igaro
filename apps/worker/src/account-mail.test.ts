@@ -5,15 +5,17 @@ import {
   MailSendError,
   renderAccountMail,
 } from './account-mail.js';
+import { randomBytes } from 'node:crypto';
 import {
   InvalidAccountMailJobError,
-  parseAccountMailJobData,
-  toJobData,
+  openAccountMailJobData,
+  sealAccountMail,
   type AccountMailJob,
 } from './account-mail-job.js';
 import { PgBossAccountMailQueue, retentionFor } from './account-mail-producer.js';
 import { ConfigError, loadWorkerConfig } from './config.js';
 import { createLogger } from './logger.js';
+import { parsePgbossSchemaMode } from './pgboss-mode.js';
 
 const TOKEN = 'Tok3n_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abc';
 const NOW = new Date('2026-11-25T12:00:00Z');
@@ -34,31 +36,80 @@ const reset: AccountMailJob = {
   expiresAt: later,
 };
 
-describe('job contract', () => {
+const KEY = Buffer.alloc(32, 7);
+const seal = (j: AccountMailJob, key = KEY) => sealAccountMail(j, key);
+
+describe('job contract (sealed, ADR 0038)', () => {
   it('round-trips through JSON', () => {
-    const json = JSON.parse(JSON.stringify(toJobData(invite)));
-    expect(parseAccountMailJobData(json)).toEqual(invite);
-    expect(parseAccountMailJobData(JSON.parse(JSON.stringify(toJobData(reset))))).toEqual(reset);
+    expect(openAccountMailJobData(JSON.parse(JSON.stringify(seal(invite))), KEY)).toEqual(invite);
+    expect(openAccountMailJobData(JSON.parse(JSON.stringify(seal(reset))), KEY)).toEqual(reset);
+  });
+
+  it('the stored form holds neither the token nor the recipient', () => {
+    for (const j of [invite, reset]) {
+      const text = JSON.stringify(seal(j));
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain('admin@school.test');
+      expect(text).not.toContain('school.test');
+    }
+    // Two seals of the same job differ (random IV and reference).
+    expect(seal(invite)).not.toEqual(seal(invite));
+  });
+
+  it('rejects a wrong key', () => {
+    expect(() => openAccountMailJobData(seal(invite), randomBytes(32))).toThrow(InvalidAccountMailJobError);
+  });
+
+  it('rejects any moved or edited routing field (AAD binding)', () => {
+    const s = seal(invite) as Record<string, string>;
+    const other = seal(invite) as Record<string, string>;
+    const cases = [
+      { ...s, kind: 'PASSWORD_RESET' },
+      { ...s, institutionId: '22222222-2222-2222-2222-222222222222' },
+      { ...s, expiresAt: new Date(NOW.getTime() + 999_000).toISOString() },
+      { ...s, ref: other.ref },
+      { ...s, sealed: other.sealed },
+      { ...s, sealed: `${s.sealed}x` },
+    ];
+    for (const c of cases) expect(() => openAccountMailJobData(c, KEY)).toThrow(InvalidAccountMailJobError);
+  });
+
+  it('refuses the old clear-text job form', () => {
+    const legacy = { kind: 'INVITE', to: 'admin@school.test', token: TOKEN, expiresAt: later.toISOString(), institutionId: invite.kind === 'INVITE' ? invite.institutionId : '' };
+    expect(() => openAccountMailJobData(legacy, KEY)).toThrow(InvalidAccountMailJobError);
   });
 
   it.each([
     null,
     'x',
     {},
-    { ...toJobData(invite), kind: 'OTHER' },
-    { ...toJobData(invite), to: 'a@b.test\r\nBcc: evil@x.test' },
-    { ...toJobData(invite), to: 'a@b.test, c@d.test' },
-    { ...toJobData(invite), token: 'short' },
-    { ...toJobData(invite), token: `${TOKEN}#x/../` },
-    { ...toJobData(invite), expiresAt: 'not a date' },
-    { ...toJobData(invite), institutionId: '' },
+    { ...seal(invite), kind: 'OTHER' },
+    { ...seal(invite), ref: 'nope' },
+    { ...seal(invite), expiresAt: 'not a date' },
+    { ...seal(invite), institutionId: '' },
+    { ...seal(invite), sealed: 'v2.a.b.c' },
+    { ...seal(invite), sealed: 'v1.a.b' },
   ])('rejects malformed payload %#', (data) => {
-    expect(() => parseAccountMailJobData(data)).toThrow(InvalidAccountMailJobError);
+    expect(() => openAccountMailJobData(data, KEY)).toThrow(InvalidAccountMailJobError);
+  });
+
+  it('refuses to seal a bad recipient, token, institution or key', () => {
+    for (const bad of [
+      { ...invite, to: 'a@b.test\r\nBcc: evil@x.test' },
+      { ...invite, to: 'a@b.test, c@d.test' },
+      { ...invite, token: 'short' },
+      { ...invite, token: `${TOKEN}#x/../` },
+      { ...invite, institutionId: 'x' },
+      { ...invite, expiresAt: new Date('nope') },
+    ] as AccountMailJob[]) {
+      expect(() => seal(bad)).toThrow(InvalidAccountMailJobError);
+    }
+    expect(() => seal(invite, Buffer.alloc(16))).toThrow();
   });
 
   it('the validation error does not echo the payload', () => {
     try {
-      parseAccountMailJobData({ ...toJobData(invite), token: 'bad token SECRET' });
+      openAccountMailJobData({ ...seal(invite), sealed: 'bad token SECRET' }, KEY);
     } catch (e) {
       expect(String(e)).not.toContain('SECRET');
       expect(String(e)).not.toContain('admin@school.test');
@@ -99,14 +150,15 @@ describe('handler', () => {
       transport: { sendMail } as never,
       from: 'iGARO <no-reply@igaro.test>',
       webBaseUrl: BASE,
+      key: KEY,
       now: () => NOW,
     }),
   });
 
   it('sends invite and reset mail', async () => {
     const { sendMail, handle } = mk();
-    expect(await handle(toJobData(invite))).toBe('sent');
-    expect(await handle(toJobData(reset))).toBe('sent');
+    expect(await handle(seal(invite))).toBe('sent');
+    expect(await handle(seal(reset))).toBe('sent');
     expect(sendMail).toHaveBeenCalledTimes(2);
     const arg = sendMail.mock.calls[0]?.[0] as Record<string, string>;
     expect(arg.to).toBe('admin@school.test');
@@ -117,9 +169,9 @@ describe('handler', () => {
 
   it('skips and does not send an expired job', async () => {
     const { sendMail, handle } = mk();
-    const expired = { ...toJobData(invite), expiresAt: new Date(NOW.getTime() - 1).toISOString() };
+    const expired = seal({ ...invite, expiresAt: new Date(NOW.getTime() - 1) });
     expect(await handle(expired)).toBe('skipped_expired');
-    const exactly = { ...toJobData(reset), expiresAt: NOW.toISOString() };
+    const exactly = seal({ ...reset, expiresAt: NOW });
     expect(await handle(exactly)).toBe('skipped_expired');
     expect(sendMail).not.toHaveBeenCalled();
   });
@@ -130,7 +182,7 @@ describe('handler', () => {
         throw new Error(`550 mailbox admin@school.test rejected, ${TOKEN}`);
       }),
     );
-    const err = await handle(toJobData(invite)).catch((e: unknown) => e);
+    const err = await handle(seal(invite)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(MailSendError);
     expect(String(err)).not.toContain('school.test');
     expect(String(err)).not.toContain(TOKEN);
@@ -144,18 +196,20 @@ describe('handler', () => {
 });
 
 describe('producer', () => {
-  it('sends the JSON form with retention bounded by token expiry', async () => {
+  it('sends the sealed form with retention bounded by token expiry', async () => {
     const send = vi.fn(async () => 'job-1');
-    const q = new PgBossAccountMailQueue({ send }, () => NOW);
+    const q = new PgBossAccountMailQueue({ send }, KEY, () => NOW);
     await q.enqueue(invite);
-    const [name, data, opts] = send.mock.calls[0] as unknown as [string, unknown, { retentionSeconds: number }];
+    const [name, data, opts] = send.mock.calls[0] as unknown as [string, object, { retentionSeconds: number }];
     expect(name).toBe('account.mail');
-    expect(data).toEqual(toJobData(invite));
+    expect(JSON.stringify(data)).not.toContain(TOKEN);
+    expect(JSON.stringify(data)).not.toContain('school.test');
+    expect(openAccountMailJobData(data, KEY)).toEqual(invite);
     expect(opts.retentionSeconds).toBe(3600 + 60);
   });
 
   it('fails loudly if pg-boss declines to create the job', async () => {
-    const q = new PgBossAccountMailQueue({ send: async () => null });
+    const q = new PgBossAccountMailQueue({ send: async () => null }, KEY);
     await expect(q.enqueue(reset)).rejects.toThrow('not created');
   });
 
@@ -178,7 +232,16 @@ describe('config', () => {
     expect(c.webBaseUrl).toBe('http://127.0.0.1:3000');
     expect(c.smtp).toMatchObject({ host: '127.0.0.1', port: 1025, secure: false });
     expect(c.pgbossSchema).toBe('pgboss');
+    expect(c.pgbossSchemaMode).toBe('auto');
     expect(c.databaseUrl).toBe(base.APP_DATABASE_URL);
+  });
+
+  it('schema mode: external by default in production, explicit value wins', () => {
+    expect(parsePgbossSchemaMode(undefined, 'production')).toBe('external');
+    expect(parsePgbossSchemaMode('', 'development')).toBe('auto');
+    expect(parsePgbossSchemaMode('auto', 'production')).toBe('auto');
+    expect(loadWorkerConfig({ ...base, PGBOSS_SCHEMA_MODE: 'external' }).pgbossSchemaMode).toBe('external');
+    expect(() => loadWorkerConfig({ ...base, PGBOSS_SCHEMA_MODE: 'yes' })).toThrow(ConfigError);
   });
 
   it('prefers WORKER_DATABASE_URL and falls back to PUBLIC_WEB_URL', () => {

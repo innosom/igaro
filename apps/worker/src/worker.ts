@@ -9,6 +9,7 @@ import {
 import { ACCOUNT_MAIL_QUEUE, InvalidAccountMailJobError } from './account-mail-job.js';
 import { ACCOUNT_MAIL_QUEUE_OPTIONS } from './account-mail-producer.js';
 import type { WorkerConfig } from './config.js';
+import { externalSchemaOptions, type PgbossSchemaMode } from './pgboss-mode.js';
 import pg from 'pg';
 import {
   AUDIT_DAILY_HEAD_CRON,
@@ -45,7 +46,13 @@ export interface StartWorkerOptions {
   databaseUrl: string;
   schema?: string;
   logger: Logger;
-  mail: AccountMailHandlerDeps;
+  /**
+   * Mail transport and links. `key` (DELIVERY_PAYLOAD_KEY) opens the sealed invite/reset jobs (ADR 0038); without it
+   * the account.mail handler is not registered (jobs wait; the API without the key queues none).
+   */
+  mail: Omit<AccountMailHandlerDeps, 'key'> & { key?: Buffer };
+  /** `external` (ADR 0038): the schema was provisioned by `setupPgbossSchema`; never create or migrate it here. */
+  schemaMode?: PgbossSchemaMode;
   /** Seconds between polls for new jobs (default 2). Tests lower it. */
   pollingIntervalSeconds?: number;
   /** audit.dailyHead (T-028). Omitted = the job is not registered. */
@@ -63,14 +70,17 @@ export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandl
   const boss = new PgBoss({
     connectionString: opts.databaseUrl,
     ...(opts.schema ? { schema: opts.schema } : {}),
+    ...externalSchemaOptions(opts.schemaMode ?? 'auto'),
     max: 4,
   });
   boss.on('error', (err: Error & { code?: string }) => logger.error({ err }, 'pg-boss error'));
   await boss.start();
   await boss.createQueue(ACCOUNT_MAIL_QUEUE, ACCOUNT_MAIL_QUEUE_OPTIONS);
 
-  const handle = createAccountMailHandler(opts.mail);
-  await boss.work<unknown>(
+  const accountMailKey = opts.mail.key;
+  if (!accountMailKey) logger.warn('DELIVERY_PAYLOAD_KEY not set: account.mail is not registered');
+  const handle = accountMailKey ? createAccountMailHandler({ ...opts.mail, key: accountMailKey }) : undefined;
+  if (handle) await boss.work<unknown>(
     ACCOUNT_MAIL_QUEUE,
     { batchSize: 1, pollingIntervalSeconds: opts.pollingIntervalSeconds ?? 2 },
     async (jobs) => {
@@ -94,7 +104,7 @@ export async function startWorker(opts: StartWorkerOptions): Promise<WorkerHandl
       }
     },
   );
-  logger.info({ queue: ACCOUNT_MAIL_QUEUE }, 'worker started');
+  if (handle) logger.info({ queue: ACCOUNT_MAIL_QUEUE }, 'worker started');
 
   if (opts.auditHead) {
     const { cron, ...deps } = opts.auditHead;
@@ -228,7 +238,8 @@ export function startWorkerFromConfig(config: WorkerConfig, logger: Logger): Pro
     databaseUrl: config.databaseUrl,
     schema: config.pgbossSchema,
     logger,
-    mail: { transport, from: config.smtp.from, webBaseUrl: config.webBaseUrl },
+    schemaMode: config.pgbossSchemaMode,
+    mail: { transport, from: config.smtp.from, webBaseUrl: config.webBaseUrl, ...(hd ? { key: hd.key } : {}) },
     ...(hd ? { holderDelivery: { pool: new pg.Pool({ connectionString: config.databaseUrl, max: 2 }), key: hd.key } } : {}),
     ...(ib
       ? { importBatch: { api: new HttpImportApi({ baseUrl: ib.apiUrl, token: ib.token }), storage: new S3WorkerStorage(ib.s3) } }

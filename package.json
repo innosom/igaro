@@ -12,6 +12,7 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "e2e": "pnpm --filter @igaro/e2e e2e",
+    "db:pgboss": "pnpm --filter @igaro/worker pgboss:setup",
     "db:seed": "pnpm --filter @igaro/db seed",
     "format": "prettier --write ."
   },

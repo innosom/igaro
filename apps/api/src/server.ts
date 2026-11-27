@@ -36,8 +36,12 @@ if (config.accountMail.driver === 'pgboss') {
     connectionString: config.accountMail.databaseUrl,
     schema: config.accountMail.schema,
     deliveryKey: config.deliveryPayloadKey,
+    schemaMode: config.accountMail.schemaMode,
   });
-  accountMail = q.accountMail;
+  // Invite and reset tokens are sealed with DELIVERY_PAYLOAD_KEY (ADR 0038). Without it (allowed outside production)
+  // no account mail is queued: a clear token never goes into the job table.
+  if (q.accountMail) accountMail = q.accountMail;
+  else console.warn('DELIVERY_PAYLOAD_KEY not set: invite and password reset mail is not queued');
   cardRender = q.cardRender;
   importBatch = q.importBatch;
   // Without DELIVERY_PAYLOAD_KEY (allowed outside production) no holder email is queued.

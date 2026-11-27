@@ -1,6 +1,7 @@
 // Outbound account mail (invites, password resets). Sending is the worker's job (T-011); the API only
 // enqueues through this interface. The job carries the RAW one-time token because the email must
-// contain it: implementations must treat it as a secret (never log it; see ADR 0005 and ADR 0006).
+// contain it: implementations must treat it as a secret (never log it; see ADR 0005 and ADR 0006). The pg-boss
+// implementation seals {to, token} (AES-256-GCM) so the job table never holds a clear token (ADR 0038).
 //
 // The contract lives in @igaro/worker (producer and consumer share it; the worker never imports the API,
 // so there is no cycle). It is re-exported here so API code keeps importing from './notifications.js'.

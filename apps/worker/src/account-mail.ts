@@ -1,9 +1,10 @@
 // Rendering and handling of account mail jobs (INVITE, PASSWORD_RESET).
+// The job row holds the token and recipient only sealed (ADR 0038); this handler opens them in memory.
 // Never log the job, the token, the link or the recipient. Errors thrown from here are stored by
 // pg-boss as the job output, so they are generic and carry no payload or SMTP response text.
 import type { Transporter } from 'nodemailer';
 import {
-  parseAccountMailJobData,
+  openAccountMailJobData,
   type AccountMailJob,
 } from './account-mail-job.js';
 
@@ -75,6 +76,8 @@ export interface AccountMailHandlerDeps {
   transport: Pick<Transporter, 'sendMail'>;
   from: string;
   webBaseUrl: string;
+  /** DELIVERY_PAYLOAD_KEY: opens the sealed {to, token} in the job (ADR 0038). */
+  key: Buffer;
   now?: () => Date;
 }
 
@@ -89,7 +92,7 @@ export class MailSendError extends Error {
 export function createAccountMailHandler(deps: AccountMailHandlerDeps) {
   const now = deps.now ?? (() => new Date());
   return async function handle(data: unknown): Promise<AccountMailOutcome> {
-    const job = parseAccountMailJobData(data);
+    const job = openAccountMailJobData(data, deps.key);
     // An expired token is useless; sending it would only confuse the recipient.
     if (job.expiresAt.getTime() <= now().getTime()) return 'skipped_expired';
     const mail = renderAccountMail(job, deps.webBaseUrl);

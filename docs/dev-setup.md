@@ -55,3 +55,20 @@ user is typically a superuser, so use `igaro_app` to exercise RLS). Anyone who c
 `igaro_app` can set the scope settings (threat model row 9, M2).
 UPDATE is granted per column; key and institution status changes are platform scope only.
 `packages/db/src/migration.test.ts` runs when `DATABASE_URL` is set (scratch schema).
+
+## Job queue schema (pg-boss), enqueue-only API role (ADR 0038)
+
+pg-boss keeps jobs in its own schema (`pgboss`, or `PGBOSS_SCHEMA`), outside RLS. In production the schema is created by
+the owner and the runtime roles get least privilege: `igaro_worker` full rights in that schema; `igaro_app` (the API) may
+only enqueue (INSERT on `job`, SELECT of the `id` and `start_after` columns, SELECT on `queue` and `version`, EXECUTE on
+`job_now()`), so it cannot read the content of any pending job.
+
+```
+pnpm db:migrate     # owner: creates the schema skeleton and default privileges (migration 20261128000000)
+pnpm db:pgboss      # owner (DATABASE_URL): installs pg-boss, creates the queues, applies the grants. Idempotent.
+```
+
+Re-run `pnpm db:pgboss` after every pg-boss upgrade (the owner applies pg-boss's own migrations). The API and worker run
+with `PGBOSS_SCHEMA_MODE=external` (the production default): they create and migrate nothing and fail at start if the schema
+is missing. Outside production the default is `auto` (pg-boss installs itself), so local dev needs no extra step. Invite,
+reset and holder-delivery jobs are sealed with `DELIVERY_PAYLOAD_KEY`; set it on both the API and the worker.

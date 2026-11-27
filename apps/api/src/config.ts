@@ -63,7 +63,16 @@ export interface Config {
   /** Where invite/reset mail jobs go (ADR 0006): dropped (default) or the pg-boss queue the worker consumes. */
   accountMail:
     | { driver: 'noop' }
-    | { driver: 'pgboss'; databaseUrl: string; schema: string | undefined };
+    | {
+        driver: 'pgboss';
+        databaseUrl: string;
+        schema: string | undefined;
+        /**
+         * PGBOSS_SCHEMA_MODE (ADR 0038). `external` (production default): the pg-boss schema and queues were provisioned
+         * by the owner (`pnpm db:pgboss`) and this role only enqueues; it creates and migrates nothing.
+         */
+        schemaMode: 'auto' | 'external';
+      };
 }
 
 /** Fixed-window limits (ADR 0005). Counts are per process; windows are in seconds. */
@@ -358,7 +367,13 @@ export function loadConfig(env: Env = process.env): Config {
     if (schema !== undefined && !/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) {
       throw new ConfigError('PGBOSS_SCHEMA must be a simple lower-case identifier');
     }
-    accountMail = { driver: 'pgboss', databaseUrl: queueUrl, schema };
+    const modeRaw = env.PGBOSS_SCHEMA_MODE;
+    if (modeRaw !== undefined && modeRaw !== '' && modeRaw !== 'auto' && modeRaw !== 'external') {
+      throw new ConfigError('PGBOSS_SCHEMA_MODE must be auto or external');
+    }
+    const schemaMode: 'auto' | 'external' =
+      modeRaw === 'auto' || modeRaw === 'external' ? modeRaw : nodeEnv === 'production' ? 'external' : 'auto';
+    accountMail = { driver: 'pgboss', databaseUrl: queueUrl, schema, schemaMode };
   }
 
   // Holder delivery key (ADR 0030): distinct from MASTER_KEY, required in production once the queue is on.
