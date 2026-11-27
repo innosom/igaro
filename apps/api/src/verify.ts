@@ -11,7 +11,7 @@ import { verifyCredential, type CredentialPayloadV1, type CredentialStatus, type
 import type { Db } from './db.js';
 import { DEFAULT_VERIFY_LIMIT } from './config.js';
 import { AppError, NotFoundError, RateLimitedError } from './errors.js';
-import { RateLimiter } from './rate-limit.js';
+import { PgRateLimiter } from './rate-limit.js';
 import type { ObjectStorage } from './storage.js';
 
 export interface VerifyRateLimit {
@@ -124,18 +124,18 @@ async function load(c: pg.PoolClient, token: string): Promise<Loaded | null> {
 }
 
 export class VerifyService {
-  private readonly ipLimiter: RateLimiter;
-  private readonly tokenLimiter: RateLimiter;
+  private readonly ipLimiter: PgRateLimiter;
+  private readonly tokenLimiter: PgRateLimiter;
 
   constructor(private readonly ctx: VerifyContext) {
     const rl = ctx.rateLimit ?? DEFAULT_VERIFY_LIMIT;
-    this.ipLimiter = new RateLimiter({ max: rl.ipMax, windowSeconds: rl.windowSeconds });
-    this.tokenLimiter = new RateLimiter({ max: rl.tokenMax, windowSeconds: rl.windowSeconds });
+    this.ipLimiter = new PgRateLimiter({ db: ctx.db, family: 'verify-ip', max: rl.ipMax, windowSeconds: rl.windowSeconds, onError: 'open' });
+    this.tokenLimiter = new PgRateLimiter({ db: ctx.db, family: 'verify-token', max: rl.tokenMax, windowSeconds: rl.windowSeconds, onError: 'open' });
   }
 
   /** Per-IP limit, counted on every request. */
-  enforceLimits(req: FastifyRequest): void {
-    const ipWait = this.ipLimiter.consume(this.ctx.hashIp(req.ip) ?? 'unknown');
+  async enforceLimits(req: FastifyRequest): Promise<void> {
+    const ipWait = await this.ipLimiter.consume(this.ctx.hashIp(req.ip) ?? 'unknown');
     if (ipWait > 0) throw new RateLimitedError(ipWait);
   }
 
@@ -144,8 +144,8 @@ export class VerifyService {
    * count, so a QR holder cannot lock a genuine credential out by hammering it; per-IP limits bound that traffic instead.
    * Keyed by the token's hash, so no token sits in memory tables.
    */
-  private noteMiss(token: string): void {
-    const wait = this.tokenLimiter.consume(createHash('sha256').update(token).digest('hex'));
+  private async noteMiss(token: string): Promise<void> {
+    const wait = await this.tokenLimiter.consume(createHash('sha256').update(token).digest('hex'));
     if (wait > 0) throw new RateLimitedError(wait);
   }
 
@@ -186,7 +186,7 @@ export class VerifyService {
       return { loaded, outcome };
     });
 
-    if (outcome.result === 'NOT_FOUND' || outcome.result === 'VERIFICATION_FAILED') this.noteMiss(token);
+    if (outcome.result === 'NOT_FOUND' || outcome.result === 'VERIFICATION_FAILED') await this.noteMiss(token);
 
     if (outcome.alertOps && loaded) {
       // Ops alert (ADR 0022): structured error line, internal ids only, no token, salt, payload or IP.
@@ -283,7 +283,7 @@ export class VerifyService {
       return slug ? { row, slug } : null;
     });
     if (!found) {
-      this.noteMiss(token);
+      await this.noteMiss(token);
       throw new NotFoundError();
     }
     return {
@@ -305,13 +305,13 @@ export function registerVerify(app: FastifyInstance, svc: VerifyService): void {
   };
   app.get('/verify/:verificationToken', async (req, reply) => {
     const token = tokenParam(req);
-    svc.enforceLimits(req);
+    await svc.enforceLimits(req);
     void reply.header('Cache-Control', 'no-store');
     return svc.verify(token, req);
   });
   app.get('/verify/:verificationToken/credential.json', async (req, reply) => {
     const token = tokenParam(req);
-    svc.enforceLimits(req);
+    await svc.enforceLimits(req);
     void reply.header('Cache-Control', 'no-store');
     return svc.credentialJson(token);
   });

@@ -27,7 +27,7 @@ import { CsvError, decodeCsv, parseCsv } from './import-csv.js';
 import { readZip, ZipError, type ZipEntry } from './import-zip.js';
 import { assertInstitutionActive } from './institution-guard.js';
 import type { ImportBatchQueue } from './notifications.js';
-import { RateLimiter } from './rate-limit.js';
+import { PgRateLimiter } from './rate-limit.js';
 import type { ObjectStorage } from './storage.js';
 
 const tenantScope = (req: FastifyRequest): TenantSession => {
@@ -67,7 +67,7 @@ interface Upload {
 export function registerCredentialImport(app: FastifyInstance, o: ImportRoutesOptions): void {
   const limits: ImportLimits = { ...DEFAULT_IMPORT_LIMITS, ...o.limits };
   const rl = o.rateLimit ?? DEFAULT_IMPORT_RATE_LIMIT;
-  const limiter = new RateLimiter({ max: rl.max, windowSeconds: rl.windowSeconds });
+  const limiter = new PgRateLimiter({ db: o.db, family: 'import', max: rl.max, windowSeconds: rl.windowSeconds, onError: 'closed' });
   const ia = { preHandler: app.requireRole('INSTITUTION_ADMIN') };
 
   const readUpload = async (req: FastifyRequest): Promise<Upload> => {
@@ -210,7 +210,7 @@ export function registerCredentialImport(app: FastifyInstance, o: ImportRoutesOp
       }
       const dryRun = q.dryRun === 'true';
 
-      const wait = limiter.consume(`import:${scope.institutionId}`);
+      const wait = await limiter.consume(scope.institutionId);
       if (wait > 0) throw new RateLimitedError(wait);
       if (!dryRun && !o.storage) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'File storage is not available');
       // Refuse before reading the body when the institution cannot issue.

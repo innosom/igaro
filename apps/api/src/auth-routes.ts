@@ -13,8 +13,7 @@ import {
 import { MAX_PASSWORD, normalizeEmail, type AccountService } from './account.js';
 import type { RateLimitConfig } from './config.js';
 import { AppError, RateLimitedError } from './errors.js';
-import { RateLimiter } from './rate-limit.js';
-import { sha256Hex } from './auth.js';
+import { PgRateLimiter, type Limiter } from './rate-limit.js';
 
 const MAX_EMAIL = 254;
 const MAX_TOKEN = 128;
@@ -50,17 +49,19 @@ export function registerAuth(
   account: AccountService,
   limits: RateLimitConfig,
 ): void {
-  const mk = (max: number, windowSeconds: number) => new RateLimiter({ max, windowSeconds });
-  const loginIp = mk(limits.login.ipMax, limits.login.windowSeconds);
-  const loginAccount = mk(limits.login.accountMax, limits.login.windowSeconds);
-  const resetIp = mk(limits.reset.ipMax, limits.reset.windowSeconds);
-  const resetAccount = mk(limits.reset.accountMax, limits.reset.windowSeconds);
-  const tokenIp = mk(limits.token.ipMax, limits.token.windowSeconds);
+  // Shared across API instances (ADR 0040). Fail closed: if the counters are unreachable, refuse (503).
+  const mk = (family: string, max: number, windowSeconds: number) =>
+    new PgRateLimiter({ db: svc.db, family, max, windowSeconds, onError: 'closed' });
+  const loginIp = mk('login-ip', limits.login.ipMax, limits.login.windowSeconds);
+  const loginAccount = mk('login-acct', limits.login.accountMax, limits.login.windowSeconds);
+  const resetIp = mk('reset-ip', limits.reset.ipMax, limits.reset.windowSeconds);
+  const resetAccount = mk('reset-acct', limits.reset.accountMax, limits.reset.windowSeconds);
+  const tokenIp = mk('token-ip', limits.token.ipMax, limits.token.windowSeconds);
   // Keys are hashed: no raw IP or email sits in memory tables. Namespaced per limiter family.
   const ipKey = (req: FastifyRequest) => svc.opts.hashIp(req.ip) ?? 'unknown';
-  const acctKey = (email: string) => sha256Hex(`acct:${normalizeEmail(email)}`);
-  const enforce = (limiter: RateLimiter, key: string): void => {
-    const wait = limiter.consume(key);
+  const acctKey = (email: string) => svc.opts.hashIp('acct:' + normalizeEmail(email)) ?? 'unknown';
+  const enforce = async (limiter: Limiter, key: string): Promise<void> => {
+    const wait = await limiter.consume(key);
     if (wait > 0) throw new RateLimitedError(wait);
   };
 
@@ -93,16 +94,16 @@ export function registerAuth(
     // Per IP: every attempt. Per account: every attempt until a success (cleared below), so
     // parallel guesses cannot overshoot. Both run before any Argon2id work. The account key is
     // derived from the submitted email whether or not the account exists.
-    enforce(loginIp, ipKey(req));
+    await enforce(loginIp, ipKey(req));
     const aKey = acctKey(email);
-    enforce(loginAccount, aKey);
+    await enforce(loginAccount, aKey);
 
     const result = await svc.login(email, password, {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });
     if (!result) throw LOGIN_FAILED();
-    loginAccount.reset(aKey);
+    await loginAccount.reset(aKey);
 
     // Replace any session the browser already holds (session fixation / stale cookie).
     const old = readCookie(req.headers.cookie, svc.opts.cookie.name);
@@ -115,7 +116,7 @@ export function registerAuth(
   app.post('/auth/invites/accept', async (req, reply) => {
     setNoStore(reply);
     requireJson(req);
-    enforce(tokenIp, ipKey(req));
+    await enforce(tokenIp, ipKey(req));
     const b = bodyOf(req);
     const token = str(b.token, MAX_TOKEN);
     const password = str(b.password, MAX_PASSWORD + 1);
@@ -130,7 +131,7 @@ export function registerAuth(
     const b = bodyOf(req);
     if (b.token !== undefined) {
       // Confirm mode: { token, password }
-      enforce(tokenIp, ipKey(req));
+      await enforce(tokenIp, ipKey(req));
       const token = str(b.token, MAX_TOKEN);
       const password = str(b.password, MAX_PASSWORD + 1);
       await account.confirmReset(token, password);
@@ -141,8 +142,8 @@ export function registerAuth(
     // Request mode: { email }. Always 202, whatever the email is (no account enumeration). The
     // limits apply to the address as typed, whether or not it has an account.
     const email = str(b.email, MAX_EMAIL);
-    enforce(resetIp, ipKey(req));
-    enforce(resetAccount, acctKey(email));
+    await enforce(resetIp, ipKey(req));
+    await enforce(resetAccount, acctKey(email));
     try {
       await account.requestReset(email);
     } catch (err) {

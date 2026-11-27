@@ -63,12 +63,14 @@ describe.skipIf(!url)('account: invites, password reset, rate limits (needs Post
     post(a, 'login', { email, password }, ip);
 
   const lastJob = () => queue.jobs[queue.jobs.length - 1]!;
-  const newAccountApp = (rateLimit: {
+  const newAccountApp = async (rateLimit: {
     login?: typeof BIG;
     reset?: typeof BIG;
     token?: { ipMax: number; windowSeconds: number };
-  }) =>
-    buildApp({
+  }) => {
+    // Counters now live in the database (ADR 0040), so a "fresh app" needs fresh counters.
+    await db.pool.query('DELETE FROM rate_limit_counters');
+    return buildApp({
       config: {
         logLevel: 'silent',
         rateLimit: {
@@ -80,6 +82,7 @@ describe.skipIf(!url)('account: invites, password reset, rate limits (needs Post
       db,
       accountMail: queue,
     });
+  };
 
   beforeAll(async () => {
     owner = new pg.Client({ connectionString: url });

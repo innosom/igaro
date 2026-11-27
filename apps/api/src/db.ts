@@ -50,6 +50,7 @@ export class Db {
   constructor(opts: DbOptions) {
     this.pool = new pg.Pool({
       max: opts.max ?? 10,
+      connectionTimeoutMillis: 5000,
       ...opts.poolConfig,
       connectionString: opts.connectionString,
     });
