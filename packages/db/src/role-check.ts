@@ -47,6 +47,42 @@ export class RuntimeRoleError extends Error {
   }
 }
 
+/**
+ * T-053 (ADR 0039): the API's queue connection must be enqueue-only. Problems: the role is or inherits the worker
+ * role, or can read job data. Never returns credentials.
+ */
+export async function checkQueueRole(
+  db: Queryable,
+  opts: { schema?: string; workerRole?: string } = {},
+): Promise<string[]> {
+  const schema = opts.schema ?? 'pgboss';
+  const worker = opts.workerRole ?? 'igaro_worker';
+  const problems: string[] = [];
+  const m = await db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM pg_roles r
+      WHERE r.rolname = $1 AND pg_has_role(current_user, r.oid, 'MEMBER')`,
+    [worker],
+  );
+  if ((m.rows[0]?.n ?? 0) > 0) problems.push(`queue role is or inherits ${worker}`);
+  const rel = await db.query<{ ok: boolean | null }>(
+    `SELECT has_column_privilege(current_user, to_regclass(quote_ident($1) || '.job'), 'data', 'SELECT') AS ok`,
+    [schema],
+  );
+  if (rel.rows[0]?.ok === true) problems.push('queue role can SELECT job data');
+  return problems;
+}
+
+/** Refuse in production, warn elsewhere. */
+export async function assertQueueRole(
+  db: Queryable,
+  opts: { nodeEnv: string; warn: (msg: string) => void; schema?: string; workerRole?: string },
+): Promise<void> {
+  const problems = await checkQueueRole(db, opts);
+  if (problems.length === 0) return;
+  if (opts.nodeEnv === 'production') throw new RuntimeRoleError(problems);
+  opts.warn(`unsafe queue database role: ${problems.join('; ')}. Production would refuse to start.`);
+}
+
 /** Refuse to start (throw) in production, warn elsewhere. `warn` receives no secrets. */
 export async function assertRuntimeRole(
   db: Queryable,

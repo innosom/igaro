@@ -40,10 +40,14 @@ describe('loadConfig', () => {
       schemaMode: 'auto',
     });
     const w = 'postgresql://igaro_worker:pw@127.0.0.1:5432/igaro';
-    expect(
-      loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: w, PGBOSS_SCHEMA: 'q' })
-        .accountMail,
-    ).toEqual({ driver: 'pgboss', databaseUrl: w, schema: 'q', schemaMode: 'auto' });
+    // T-053: the worker login is never accepted by the API, even with a valid URL.
+    expect(() => loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: w })).toThrow(ConfigError);
+    expect(loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA: 'q' }).accountMail).toEqual({
+      driver: 'pgboss',
+      databaseUrl: good.APP_DATABASE_URL,
+      schema: 'q',
+      schemaMode: 'auto',
+    });
     // ADR 0038: an explicit mode wins.
     expect(
       loadConfig({ ...good, ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA_MODE: 'external' }).accountMail,
@@ -53,7 +57,6 @@ describe('loadConfig', () => {
       { ACCOUNT_MAIL_QUEUE: 'redis' },
       { ACCOUNT_MAIL_QUEUE: 'pgboss', PGBOSS_SCHEMA: 'x;drop' },
       { ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: 'not a url' },
-      { ACCOUNT_MAIL_QUEUE: 'pgboss', WORKER_DATABASE_URL: w, DATABASE_URL: w },
     ]) {
       expect(() => loadConfig({ ...good, ...bad })).toThrow(ConfigError);
     }
