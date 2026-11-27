@@ -2,7 +2,7 @@
 // Runs as igaro_app in a scratch schema. Includes two app instances sharing one database.
 import { randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import pg from 'pg';
 import { buildApp } from './app.js';
 import { Db } from './db.js';
@@ -109,6 +109,114 @@ describe.skipIf(!url)('Postgres rate limiter (needs Postgres)', () => {
     } finally {
       await broken.close();
     }
+  });
+
+  describe('blocked-key cache, timeout and single-flight cleanup (T-054)', () => {
+    const spyQueries = () => {
+      const texts: string[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const orig = db.pool.query.bind(db.pool) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const spy = vi.spyOn(db.pool, 'query').mockImplementation(((q: any, ...rest: unknown[]) => {
+        texts.push(typeof q === 'string' ? q : q.text);
+        return orig(q, ...rest);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any);
+      return { texts, restore: () => spy.mockRestore() };
+    };
+    const consumeCalls = (texts: string[]) => texts.filter((t) => t.includes('ON CONFLICT')).length;
+
+    it('rejected requests skip the database until the window ends, then the cache never blocks', async () => {
+      let t = 1_900_000_000_000;
+      const l = mk('c1', 1, { now: () => t });
+      expect(await l.consume('a')).toBe(0);
+      expect(await l.consume('a')).toBe(60); // from the DB, now cached
+      const spy = spyQueries();
+      try {
+        t += 10_000;
+        expect(await l.consume('a')).toBe(50);
+        expect(await l.consume('a')).toBe(50);
+        expect(consumeCalls(spy.texts)).toBe(0);
+        t += 49_999;
+        expect(await l.consume('a')).toBe(1); // still inside the window
+        expect(consumeCalls(spy.texts)).toBe(0);
+        t += 2; // window over: the DB decides and starts a new window
+        expect(await l.consume('a')).toBe(0);
+        expect(consumeCalls(spy.texts)).toBe(1);
+      } finally {
+        spy.restore();
+      }
+    });
+
+    it('reset clears the cache entry', async () => {
+      const l = mk('c2', 1);
+      expect(await l.consume('a')).toBe(0);
+      expect(await l.consume('a')).toBeGreaterThan(0);
+      await l.reset('a');
+      expect(await l.consume('a')).toBe(0);
+    });
+
+    it('a reset that races an in-flight blocked consume is not re-cached', async () => {
+      const l = mk('c3', 1);
+      expect(await l.consume('a')).toBe(0);
+      const inflight = l.consume('a'); // will come back blocked
+      await l.reset('a');
+      expect(await inflight).toBeGreaterThan(0);
+      expect(await l.consume('a')).toBe(0); // not served from a stale cache entry
+    });
+
+    it('the cache is bounded', async () => {
+      const l = mk('c4', 1, { maxCachedKeys: 3 });
+      for (const k of ['a', 'b', 'c', 'd', 'e']) {
+        await l.consume(k);
+        await l.consume(k);
+      }
+      expect(((l as unknown as { blocked: Map<string, number> }).blocked).size).toBe(3);
+    });
+
+    it('a stuck database hits the query timeout: closed -> 503, open -> memory fallback', async () => {
+      await owner.query('BEGIN');
+      try {
+        await owner.query('LOCK TABLE rate_limit_counters IN ACCESS EXCLUSIVE MODE');
+        const started = Date.now();
+        const closed = mk('c5', 1, { queryTimeoutMs: 200 });
+        const err = await closed.consume('a').catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).statusCode).toBe(503);
+        expect(Date.now() - started).toBeLessThan(3000);
+        const open = mk('c5o', 1, { queryTimeoutMs: 200, onError: 'open' });
+        expect(await open.consume('a')).toBe(0);
+        expect(await open.consume('a')).toBeGreaterThan(0);
+      } finally {
+        await owner.query('ROLLBACK');
+      }
+    });
+
+    it('runs at most one cleanup at a time per process', async () => {
+      const seen: string[] = [];
+      const orig = db.pool.query.bind(db.pool) as unknown as (...a: unknown[]) => Promise<unknown>;
+      // Make cleanup slow so the overlap is certain.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.spyOn(db.pool, 'query').mockImplementation(((q: any, ...rest: unknown[]) => {
+        const text = typeof q === 'string' ? q : q.text;
+        seen.push(text);
+        const p = orig(q, ...rest);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return text.includes('FOR UPDATE SKIP LOCKED') ? p.then(async (r) => (await new Promise((res) => setTimeout(res, 300)), r)) : p;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any);
+      try {
+        const l = mk('c6', 100, { cleanupRate: 1 });
+        await Promise.all(Array.from({ length: 10 }, (_, i) => l.consume(`k${i}`)));
+        const cleanups = () => seen.filter((t) => t.includes('FOR UPDATE SKIP LOCKED')).length;
+        expect(cleanups()).toBe(1);
+        await new Promise((r) => setTimeout(r, 450)); // the slow cleanup finishes
+        await l.consume('again');
+        expect(cleanups()).toBe(2);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
   });
 
   it('igaro_app has only SELECT/INSERT/UPDATE/DELETE on the table; PUBLIC has nothing', async () => {

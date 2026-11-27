@@ -283,6 +283,27 @@ describe.skipIf(!url)('public verification (needs Postgres)', () => {
     for (const l of lines) for (const v of [t1.verificationToken, t1.payload.salt, RAW_IP]) expect(l).not.toContain(v);
   });
 
+  it('the ops alert is emitted even when the per-token limiter then refuses the request (T-054)', async () => {
+    const t = await issue('A');
+    await ownerQuery(`UPDATE credentials SET signature = $2 WHERE id = $1`, [t.id, 'B'.repeat(86)], true);
+    const out: string[] = [];
+    const stream = new Writable({ write(chunk, _e, cb) { out.push(String(chunk)); cb(); } });
+    const strict = await buildApp({
+      config: { logLevel: 'info', ipHashKey, masterKey: master, rateLimit: { login: BIG, reset: BIG, token: { ipMax: 100, windowSeconds: 900 }, verify: { ipMax: 100, tokenMax: 0, windowSeconds: 60 } } },
+      db,
+      logStream: stream,
+    });
+    try {
+      const res = await verify(t.verificationToken, '198.51.100.99', strict);
+      expect(res.statusCode).toBe(429); // the miss budget is 0, so the limiter refuses after the check
+      const alerts = out.map((l) => JSON.parse(l)).filter((l) => l.event === 'VERIFICATION_INTEGRITY_FAILURE');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toMatchObject({ alert: 'ops', credentialId: t.id });
+    } finally {
+      await strict.close();
+    }
+  });
+
   it('a payload copied from another credential fails the row binding', async () => {
     const a = await issue('A');
     const b = await issue('A');
