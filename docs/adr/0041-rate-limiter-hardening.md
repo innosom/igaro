@@ -24,6 +24,21 @@ Status: Accepted. Addendum to ADR 0040 (resolves the T-052 review items M1, L2, 
 5. **Verify ordering.** In `VerifyService.verify` the `VERIFICATION_INTEGRITY_FAILURE` ops alert is logged before
    `noteMiss`, so a limiter refusal or failure cannot suppress it.
 
+## Addendum (T-055): server-side timeouts
+Recommended option taken under the owner's standing permission.
+- Item 3 is amended: the client-side `query_timeout` is now only a backstop. Limiter queries (consume, reset, cleanup) run on a small
+  dedicated pool, `Db.limiterPool` (default 4 connections, same role and search_path as the main pool), whose connections start with
+  `-c statement_timeout=<ms> -c lock_timeout=<ms>` (`limiterTimeoutMs`, default 2000). Postgres cancels a stuck or lock-waiting statement
+  itself, so it no longer keeps running after the client gave up. A separate pool (not SET LOCAL) keeps each limiter query a single round
+  trip and keeps a slow limiter from exhausting the main pool. The failure path is unchanged (closed 503 / open memory fallback).
+- L3 (known, accepted): `reset` of a key that is still blocked clears the counter and the cache entry, so the key starts a fresh window. It is
+  called only after a successful login (or equivalent), which proves the caller holds the secret; other instances may still hold a cached
+  block until it expires (they refuse a little more, never less).
+
+- Known Low (T-055 review): a `?options=` in the database URL overrides pool `options` and would drop the server-side timeouts (the client
+  `query_timeout` backstop stays). The limiter pool is shared by all limiter families (4 connections); size `max_connections` for 4 extra
+  connections per API process.
+
 ## Tests
 `apps/api/src/rate-limit-pg.test.ts` (cache skips DB and expires, reset, reset race, bound, timeout both modes, single
 flight) and `apps/api/src/verify.test.ts` (alert emitted when the token limiter then refuses).

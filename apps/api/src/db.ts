@@ -24,6 +24,10 @@ export const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID
 export interface DbOptions {
   connectionString: string;
   max?: number;
+  /** Server-side statement_timeout and lock_timeout (ms) for the rate-limiter pool (T-055). Default 2000. */
+  limiterTimeoutMs?: number;
+  /** Max connections of the dedicated rate-limiter pool (T-055). Default 4. */
+  limiterPoolMax?: number;
   /** Extra pg pool settings (tests use this for search_path). */
   poolConfig?: pg.PoolConfig;
 }
@@ -46,8 +50,32 @@ const LOOKUP_KEY_SET: ReadonlySet<string> = new Set(LOOKUP_KEYS);
 
 export class Db {
   readonly pool: pg.Pool;
+  private limiter?: pg.Pool;
+  private readonly opts: DbOptions;
+
+  /**
+   * Small dedicated pool for rate-limiter queries (T-055, ADR 0041). Its connections start with server-side
+   * statement_timeout and lock_timeout, so Postgres itself cancels a stuck statement instead of leaving it running
+   * after the client gave up. Same role and search_path as the main pool. Created on first use.
+   */
+  get limiterPool(): pg.Pool {
+    if (!this.limiter) {
+      const ms = Math.max(1, Math.floor(this.opts.limiterTimeoutMs ?? 2000));
+      const base = this.opts.poolConfig?.options;
+      this.limiter = new pg.Pool({
+        connectionTimeoutMillis: 5000,
+        ...this.opts.poolConfig,
+        max: this.opts.limiterPoolMax ?? 4,
+        connectionString: this.opts.connectionString,
+        options: `${base ? base + ' ' : ''}-c statement_timeout=${ms} -c lock_timeout=${ms}`,
+      });
+      this.limiter.on('error', () => undefined);
+    }
+    return this.limiter;
+  }
 
   constructor(opts: DbOptions) {
+    this.opts = opts;
     this.pool = new pg.Pool({
       max: opts.max ?? 10,
       connectionTimeoutMillis: 5000,
@@ -59,6 +87,7 @@ export class Db {
   }
 
   async close(): Promise<void> {
+    await this.limiter?.end();
     await this.pool.end();
   }
 
