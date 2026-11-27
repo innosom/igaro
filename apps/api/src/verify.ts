@@ -186,8 +186,6 @@ export class VerifyService {
       return { loaded, outcome };
     });
 
-    if (outcome.result === 'NOT_FOUND' || outcome.result === 'VERIFICATION_FAILED') await this.noteMiss(token);
-
     if (outcome.alertOps && loaded) {
       // Ops alert (ADR 0022): structured error line, internal ids only, no token, salt, payload or IP.
       this.ctx.log.error(
@@ -202,6 +200,8 @@ export class VerifyService {
         'verification integrity failure',
       );
     }
+    // After the alert (T-054): a limiter failure or refusal must never suppress the ops alert.
+    if (outcome.result === 'NOT_FOUND' || outcome.result === 'VERIFICATION_FAILED') await this.noteMiss(token);
     return this.present(loaded, outcome);
   }
 

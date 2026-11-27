@@ -85,11 +85,24 @@ export interface PgRateLimiterOptions {
   onError: 'closed' | 'open';
   /** Probability per call of deleting a batch of expired rows. Default 0.02. */
   cleanupRate?: number;
-  /** Test hook (ms since epoch). Default: the database clock. */
+  /** Test hook (ms since epoch). Default: the database clock for counting; the process clock for the blocked-key cache. */
   now?: () => number;
+  /** Client-side per-query timeout in ms (T-054). A stuck database then takes the 'onError' path. Default 2000. */
+  queryTimeoutMs?: number;
+  /** Bound on the blocked-key cache (T-054). Default 10000. */
+  maxCachedKeys?: number;
 }
 
 const CLEANUP_BATCH = 500;
+const DEFAULT_QUERY_TIMEOUT_MS = 2000;
+const DEFAULT_MAX_CACHED = 10_000;
+/** node-postgres honours query_timeout at runtime but its typings omit it. */
+function withTimeout<T extends { text: string; values?: unknown[] }>(q: T, ms: number): T {
+  return { ...q, query_timeout: ms } as T;
+}
+
+/** Pools with a cleanup in flight: at most one per process per pool (T-054). */
+const cleaning = new WeakSet<object>();
 
 const CONSUME_SQL = `
 INSERT INTO rate_limit_counters AS r ("key", "count", "reset_at")
@@ -113,6 +126,10 @@ DELETE FROM rate_limit_counters WHERE "key" IN (
 
 export class PgRateLimiter implements Limiter {
   private readonly fallback: RateLimiter;
+  /** Blocked keys (namespaced) -> process-clock ms when the window ends. Rejected requests skip the database. */
+  private readonly blocked = new Map<string, number>();
+  /** Bumped by reset() so an in-flight consume cannot re-cache a key that was just cleared. */
+  private resetEpoch = 0;
 
   constructor(private readonly o: PgRateLimiterOptions) {
     this.fallback = new RateLimiter({ max: o.max, windowSeconds: o.windowSeconds, ...(o.now ? { now: o.now } : {}) });
@@ -127,15 +144,27 @@ export class PgRateLimiter implements Limiter {
    * moves when the window has expired, so a flood cannot extend its own lockout.
    */
   async consume(key: string): Promise<number> {
+    const nsKey = this.k(key);
+    const clock = this.o.now ?? Date.now;
+    // Blocked-key cache: never blocks once the window has passed. The stored end is computed from a timestamp taken
+    // BEFORE the query, so it is never later than the database's reset_at.
+    const cachedUntil = this.blocked.get(nsKey);
+    if (cachedUntil !== undefined) {
+      const t = clock();
+      if (cachedUntil > t) return Math.max(1, Math.ceil((cachedUntil - t) / 1000));
+      this.blocked.delete(nsKey);
+    }
     let row: { count: number; wait: number } | undefined;
+    const startedAt = clock();
+    const epoch = this.resetEpoch;
     try {
       const at = this.o.now ? new Date(this.o.now()) : null;
-      const r = await this.o.db.pool.query<{ count: number; wait: number }>(CONSUME_SQL, [
-        this.k(key),
-        this.o.windowSeconds,
-        this.o.max,
-        at,
-      ]);
+      const r = await this.o.db.pool.query<{ count: number; wait: number }>(
+        withTimeout(
+          { text: CONSUME_SQL, values: [nsKey, this.o.windowSeconds, this.o.max, at] },
+          this.o.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS,
+        ),
+      );
       row = r.rows[0];
     } catch {
       row = undefined; // not logged or echoed: driver errors can carry statement parameters
@@ -145,21 +174,50 @@ export class PgRateLimiter implements Limiter {
       throw new AppError(503, 'RATE_LIMIT_UNAVAILABLE', 'Service temporarily unavailable');
     }
     this.maybeCleanup();
-    return row.count <= this.o.max ? 0 : Math.max(1, Math.ceil(row.wait));
+    if (row.count <= this.o.max) return 0;
+    if (epoch === this.resetEpoch && row.wait > 0) this.remember(nsKey, startedAt + row.wait * 1000, startedAt);
+    return Math.max(1, Math.ceil(row.wait));
+  }
+
+  private remember(nsKey: string, until: number, t: number): void {
+    const cap = this.o.maxCachedKeys ?? DEFAULT_MAX_CACHED;
+    if (!this.blocked.has(nsKey) && this.blocked.size >= cap) {
+      for (const [k, u] of this.blocked) if (u <= t) this.blocked.delete(k);
+      for (const k of this.blocked.keys()) {
+        if (this.blocked.size < cap) break;
+        this.blocked.delete(k); // insertion order: oldest first
+      }
+    }
+    this.blocked.set(nsKey, until);
   }
 
   async reset(key: string): Promise<void> {
+    this.resetEpoch += 1;
+    this.blocked.delete(this.k(key));
     try {
-      await this.o.db.pool.query('DELETE FROM rate_limit_counters WHERE "key" = $1', [this.k(key)]);
+      await this.o.db.pool.query(
+        withTimeout(
+          { text: 'DELETE FROM rate_limit_counters WHERE "key" = $1', values: [this.k(key)] },
+          this.o.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS,
+        ),
+      );
     } catch {
       // A counter that cannot be cleared only makes the limiter stricter; do not fail a successful login for it.
     }
+    this.resetEpoch += 1;
+    this.blocked.delete(this.k(key));
     this.fallback.reset(key);
   }
 
   /** Keeps the table bounded: now and then delete one batch of long-expired windows. */
   private maybeCleanup(): void {
     if (Math.random() >= (this.o.cleanupRate ?? 0.02)) return;
-    void this.o.db.pool.query(CLEANUP_SQL).catch(() => undefined);
+    const pool = this.o.db.pool;
+    if (cleaning.has(pool)) return; // single flight per process
+    cleaning.add(pool);
+    void pool
+      .query(withTimeout({ text: CLEANUP_SQL }, this.o.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS))
+      .catch(() => undefined)
+      .finally(() => cleaning.delete(pool));
   }
 }
