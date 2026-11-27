@@ -52,6 +52,14 @@ jobs:
         run: |
           open=$(gh pr list --repo "$GITHUB_REPOSITORY" --label igaro-build --state open --json number --jq 'length' 2>/dev/null || true)
           case "$open" in ''|*[!0-9]*) open=0 ;; esac
+          # Plan finished: no unchecked task left, so there is nothing to build (a failed run every 6 h otherwise).
+          if [ -z "${{ github.event.inputs.task }}" ] && [ "$open" = "0" ]; then
+            todo=$(gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/docs/plan.md" 2>/dev/null | grep -c '^- \[ \] T-' || true)
+            if [ "$todo" = "0" ] && gh api "repos/$GITHUB_REPOSITORY/contents/docs/plan.md" >/dev/null 2>&1; then
+              echo "::notice::docs/plan.md has no unchecked tasks; nothing to build."
+              open=-1
+            fi
+          fi
           echo "Open build PRs: $open"
           echo "open=$open" >> "$GITHUB_OUTPUT"
           if [ "$open" != "0" ] && [ -z "${{ github.event.inputs.task }}" ]; then
