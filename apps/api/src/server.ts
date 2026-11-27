@@ -1,3 +1,4 @@
+import { assertRuntimeRole } from '@igaro/db';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { Db } from './db.js';
@@ -15,6 +16,11 @@ import {
 
 const config = loadConfig();
 const db = new Db({ connectionString: config.appDatabaseUrl });
+// T-050 (ADR 0037): refuse to start in production on a role that would bypass RLS.
+await assertRuntimeRole(db.pool, {
+  nodeEnv: config.nodeEnv,
+  warn: (m) => console.warn(m),
+});
 
 // Account mail goes through pg-boss when ACCOUNT_MAIL_QUEUE=pgboss (ADR 0006); otherwise it is dropped.
 let accountMail: AccountMailQueue = new NoopAccountMailQueue();

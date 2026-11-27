@@ -1,4 +1,6 @@
 // Worker entrypoint: `pnpm --filter @igaro/worker start`.
+import { assertRuntimeRole } from '@igaro/db';
+import pg from 'pg';
 import { ConfigError, loadWorkerConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { startWorkerFromConfig } from './worker.js';
@@ -13,6 +15,18 @@ try {
 }
 
 const logger = createLogger(config.logLevel);
+// T-050 (ADR 0037): refuse to start in production on a role that would bypass RLS.
+{
+  const checkPool = new pg.Pool({ connectionString: config.databaseUrl, max: 1 });
+  try {
+    await assertRuntimeRole(checkPool, { nodeEnv: config.nodeEnv, warn: (m) => logger.warn(m) });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : 'runtime database role check failed');
+    process.exit(1);
+  } finally {
+    await checkPool.end();
+  }
+}
 const worker = await startWorkerFromConfig(config, logger);
 
 let stopping = false;
