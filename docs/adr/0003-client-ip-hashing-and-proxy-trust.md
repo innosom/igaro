@@ -18,6 +18,6 @@ a load balancer every client would appear to have the proxy's IP. That would bre
    spoof `X-Forwarded-For` and evade rate limits. The real deployment topology is set at staging (T-047).
 
 ## Consequences
-- Logs contain no raw IPs of verifiers or admins. Per-IP rate limiting still works on the real IP in memory.
+- Logs contain no raw IPs of verifiers or admins. Per-IP rate limiting works on the hashed IP (ADR 0040: counters live in Postgres).
 - Without the key, a hashed IP can't be reversed. Rotating `IP_HASH_KEY` breaks correlation with older logs.
 - A misconfigured `TRUST_PROXY` on staging would make every client share the proxy's rate-limit bucket. T-047 must set it.

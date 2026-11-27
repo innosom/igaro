@@ -422,6 +422,7 @@ describe.skipIf(!url)('credential import (needs Postgres)', () => {
   });
 
   it('is rate limited per institution and needs storage only for real runs', async () => {
+    await db.pool.query('DELETE FROM rate_limit_counters'); // counters are shared in the database (ADR 0040)
     const limited = await buildApp({
       config: { logLevel: 'silent', rateLimit, masterKey: master },
       db,

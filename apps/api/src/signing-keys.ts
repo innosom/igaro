@@ -13,7 +13,7 @@ import { appendAudit } from './audit.js';
 import { verifyPassword } from './auth.js';
 import { AppError, NotFoundError, RateLimitedError } from './errors.js';
 import { assertInstitutionActive } from './institution-guard.js';
-import { RateLimiter } from './rate-limit.js';
+import { PgRateLimiter } from './rate-limit.js';
 
 const MAX_REASON = 500;
 const MAX_KID_ATTEMPTS = 5;
@@ -64,7 +64,7 @@ export interface SigningKeyOptions {
 }
 
 export class SigningKeyService {
-  private readonly limiter: RateLimiter;
+  private readonly limiter: PgRateLimiter;
 
   constructor(
     private readonly db: Db,
@@ -72,7 +72,7 @@ export class SigningKeyService {
     private readonly opts: SigningKeyOptions = {},
   ) {
     const rl = opts.rateLimit ?? DEFAULT_KEY_CHANGE_RATE_LIMIT;
-    this.limiter = new RateLimiter({ max: rl.max, windowSeconds: rl.windowSeconds });
+    this.limiter = new PgRateLimiter({ db, family: 'keychange', max: rl.max, windowSeconds: rl.windowSeconds, onError: 'closed' });
   }
 
   /**
@@ -80,7 +80,7 @@ export class SigningKeyService {
    * re-entry against the session user's own hash (ADR 0012 decision 3). Runs before any key change.
    */
   private async authorise(session: TenantSession, password: string): Promise<void> {
-    const wait = this.limiter.consume(`keys:${session.institutionId}`);
+    const wait = await this.limiter.consume(session.institutionId);
     if (wait > 0) throw new RateLimitedError(wait);
     const hash = await this.db.withTenant(session, async (c) => {
       const r = await c.query<{ password_hash: string | null }>(

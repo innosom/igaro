@@ -260,7 +260,8 @@ describe.skipIf(!url)('init migration (needs Postgres at DATABASE_URL)', () => {
       for (const t of TENANT_TABLES) {
         expect(byName.get(t), t).toMatchObject({ relrowsecurity: true, relforcerowsecurity: true });
       }
-      expect(r.rows.length).toBe(TENANT_TABLES.length);
+      // rate_limit_counters (ADR 0040) is deliberately not tenant data and has no RLS.
+      expect(r.rows.filter((x) => x.relname !== 'rate_limit_counters').length).toBe(TENANT_TABLES.length);
     });
   });
 

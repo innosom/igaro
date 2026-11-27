@@ -10,7 +10,7 @@ import { DEFAULT_VERIFY_LIMIT } from './config.js';
 import type { Db } from './db.js';
 import { AppError, NotFoundError, RateLimitedError } from './errors.js';
 import type { ObjectStorage } from './storage.js';
-import { RateLimiter } from './rate-limit.js';
+import { PgRateLimiter } from './rate-limit.js';
 import type { VerifyRateLimit } from './verify.js';
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
@@ -26,24 +26,25 @@ export interface PublicLookupContext {
 }
 
 export class PublicLookupService {
-  private readonly keysIp: RateLimiter;
-  private readonly holderIp: RateLimiter;
-  private readonly holderMiss: RateLimiter;
+  private readonly keysIp: PgRateLimiter;
+  private readonly holderIp: PgRateLimiter;
+  private readonly holderMiss: PgRateLimiter;
 
   constructor(private readonly ctx: PublicLookupContext) {
     const rl = ctx.rateLimit ?? DEFAULT_VERIFY_LIMIT;
-    this.keysIp = new RateLimiter({ max: rl.ipMax, windowSeconds: rl.windowSeconds });
-    this.holderIp = new RateLimiter({ max: rl.ipMax, windowSeconds: rl.windowSeconds });
-    this.holderMiss = new RateLimiter({ max: rl.tokenMax, windowSeconds: rl.windowSeconds });
+    const mk = (family: string, max: number) => new PgRateLimiter({ db: ctx.db, family, max, windowSeconds: rl.windowSeconds, onError: 'open' });
+    this.keysIp = mk('keys-ip', rl.ipMax);
+    this.holderIp = mk('holder-ip', rl.ipMax);
+    this.holderMiss = mk('holder-miss', rl.tokenMax);
   }
 
-  private limit(l: RateLimiter, req: FastifyRequest): void {
-    const wait = l.consume(this.ctx.hashIp(req.ip) ?? 'unknown');
+  private async limit(l: PgRateLimiter, req: FastifyRequest): Promise<void> {
+    const wait = await l.consume(this.ctx.hashIp(req.ip) ?? 'unknown');
     if (wait > 0) throw new RateLimitedError(wait);
   }
 
   async keys(slug: string, req: FastifyRequest): Promise<{ keys: Record<string, unknown>[] }> {
-    this.limit(this.keysIp, req);
+    await this.limit(this.keysIp, req);
     if (!SLUG_RE.test(slug)) throw new NotFoundError();
     const rows = await this.ctx.db.withLookup({ 'app.institution_slug': slug }, async (c) => {
       const inst = (await c.query<{ id: string }>(`SELECT id FROM institutions WHERE slug = $1`, [slug])).rows[0];
@@ -72,13 +73,13 @@ export class PublicLookupService {
   }
 
   async holderView(token: string, req: FastifyRequest): Promise<Record<string, unknown>> {
-    this.limit(this.holderIp, req);
-    const miss = (): never => {
-      const wait = this.holderMiss.consume(sha256Hex(token));
+    await this.limit(this.holderIp, req);
+    const miss = async (): Promise<never> => {
+      const wait = await this.holderMiss.consume(sha256Hex(token));
       if (wait > 0) throw new RateLimitedError(wait);
       throw new NotFoundError();
     };
-    if (!TOKEN_RE.test(token)) return miss();
+    if (!TOKEN_RE.test(token)) return await miss();
     const hash = sha256Hex(token);
     const found = await this.ctx.db.withLookup({ 'app.holder_token_hash': hash }, async (c) => {
       const cr = (
@@ -115,7 +116,7 @@ export class PublicLookupService {
       ).rows[0];
       return inst && holder && type ? { cr, inst, holder, type } : null;
     });
-    if (!found) return miss();
+    if (!found) return await miss();
     const { cr, inst, holder, type } = found;
     const expired = cr.status === 'ACTIVE' && cr.expires_at !== null && cr.expires_at.getTime() <= Date.now();
     const vt = cr.verification_token;
@@ -152,13 +153,13 @@ export class PublicLookupService {
 
   /** Holder card download (ADR 0031): the ADR 0029 serve-only-what-verifies rules, authenticated by the holder token. */
   async holderCard(token: string, ext: 'png' | 'pdf', req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> {
-    this.limit(this.holderIp, req);
-    const miss = (): never => {
-      const wait = this.holderMiss.consume(sha256Hex(token));
+    await this.limit(this.holderIp, req);
+    const miss = async (): Promise<never> => {
+      const wait = await this.holderMiss.consume(sha256Hex(token));
       if (wait > 0) throw new RateLimitedError(wait);
       throw new NotFoundError();
     };
-    if (!TOKEN_RE.test(token)) return miss();
+    if (!TOKEN_RE.test(token)) return await miss();
     const hash = sha256Hex(token);
     const row = await this.ctx.db.withLookup({ 'app.holder_token_hash': hash }, async (c) => {
       const cr = (
@@ -186,7 +187,7 @@ export class PublicLookupService {
       ).rows[0];
       return { cr, key };
     });
-    if (!row) return miss();
+    if (!row) return await miss();
     const { cr, key } = row;
     const payload = cr.payload as { credentialId?: unknown; institutionId?: unknown; expiresAt?: unknown } | null;
     const ok =
@@ -200,12 +201,12 @@ export class PublicLookupService {
         { event: 'card.integrity_failure', institutionId: cr.institution_id, credentialId: cr.id, via: 'holder' },
         'stored credential failed integrity check; card not served',
       );
-      return miss();
+      return await miss();
     }
     // Integrity first (invariant 7), then state. Expiry comes from the signed payload.
     const exp = payload?.expiresAt;
     const expired = typeof exp === 'string' && Date.parse(exp) <= Date.now();
-    if (cr.status !== 'ACTIVE' || expired) return miss();
+    if (cr.status !== 'ACTIVE' || expired) return await miss();
 
     const storage = this.ctx.storage;
     if (!storage) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Cards are not available right now');

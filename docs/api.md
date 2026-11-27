@@ -81,7 +81,7 @@ All IA only, `Cache-Control: no-store`.
 | GET /holder/:holderToken | holder view: card links, credential file (private link) |
 | GET /holder/:holderToken/card.png, /card.pdf | token-authenticated card download: 302 to a 60 s signed URL (ADR 0031) |
 
-Rate-limit exceeded: 429 with Retry-After. Unknown tokens always 200 NOT_FOUND-shaped or 404 with identical timing.
+Rate-limit exceeded: 429 with Retry-After. All limits (login, reset, token, verify, keys.json, holder view, key change, import) are fixed windows kept in Postgres (`rate_limit_counters`, hashed keys) and shared by every API instance (ADR 0040); if the counters are unreachable, auth/import/key-change fail closed with 503 `RATE_LIMIT_UNAVAILABLE` and the public read endpoints fall back to a per-process limit. Unknown tokens always 200 NOT_FOUND-shaped or 404 with identical timing.
 
 Implemented (T-032, ADR 0022): `/verify/:token` answers 200 for every result; unknown, malformed and draft tokens give `{result:"NOT_FOUND"}` with all other fields `null` (so do VERIFICATION_FAILED responses, which reveal nothing from the row). `holder` is `{fullName, idNumber?, attributes?, photoUrl?}` per `publicFields`; `institution` is `{name, slug, cardTitle, primaryColor, secondaryColor}`; `type` is `{code, name, kind}`; `supersededBy` is the new credential's verification token; VALID_WITH_WARNING adds `warning`. `credential.json` is 404 for unknown tokens and carries the full signed payload (not limited by `publicFields`). Both are `Cache-Control: no-store` and share per-IP and per-token limits (defaults 60/120 per 60 s, `RATE_LIMIT_VERIFY_*`).
 

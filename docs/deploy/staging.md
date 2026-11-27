@@ -16,7 +16,7 @@ internet -> TLS ingress -> web (Next.js, public) -> api (private network) <- wor
 | Variable | Notes |
 |---|---|
 | `TRUST_PROXY` | Hop count of proxies in front of the API (ADR 0003), e.g. `2` for ingress + web. Never `true`. |
-| `IP_HASH_KEY` | `openssl rand -base64 32`. Keys the hashed-IP logs and rate limits. |
+| `IP_HASH_KEY` | `openssl rand -base64 32`. Keys the hashed-IP logs and rate limits (also the account keys in `rate_limit_counters`). Must be identical on every API instance, or limits stop being shared (ADR 0040). |
 | `MASTER_KEY` | 32 bytes base64, held outside the DB. Different from every other secret. |
 | `AUDIT_HEAD_PUBLIC_KEYS` | Public keys for the daily signed head. |
 | `COOKIE_SECURE` | `true` (default in production). |

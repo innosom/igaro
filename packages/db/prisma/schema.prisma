@@ -479,3 +479,13 @@ model ImportRow {
   @@index([institutionId, createdAt])
   @@map("import_rows")
 }
+
+// Fixed-window rate-limit counters shared by all API instances (T-052, ADR 0040). Not tenant data: no RLS.
+model RateLimitCounter {
+  key     String   @id
+  count   Int
+  resetAt DateTime @map("reset_at") @db.Timestamptz(6)
+
+  @@index([resetAt])
+  @@map("rate_limit_counters")
+}
