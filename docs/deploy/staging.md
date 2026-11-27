@@ -25,7 +25,11 @@ internet -> TLS ingress -> web (Next.js, public) -> api (private network) <- wor
 | `DELIVERY_PAYLOAD_KEY` | Shared with worker, not `MASTER_KEY`. |
 
 Worker: `INTERNAL_API_URL` must be `https://...` in production, plus `INTERNAL_API_TOKEN`, `S3_*`,
-`DELIVERY_PAYLOAD_KEY`, `WORKER_DATABASE_URL`.
+`DELIVERY_PAYLOAD_KEY`, `WORKER_DATABASE_URL` (worker only; the API refuses it, ADR 0039).
+
+Release step, after `pnpm db:migrate` and after each pg-boss upgrade, run as the owner (`DATABASE_URL`): `pnpm db:pgboss`.
+It fails if the pgboss schema or a relation is owned by a runtime role. Keep `PGBOSS_SCHEMA_MODE=external`
+(the production default; the API warns on `auto`).
 Web: `API_URL` points at the private API address; `WEB_TRUST_PROXY_HOPS` per ADR 0026.
 
 See `.env.example` for the full list and `.env.staging.example` for placeholders.

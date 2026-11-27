@@ -349,20 +349,12 @@ export function loadConfig(env: Env = process.env): Config {
   }
   let accountMail: Config['accountMail'] = { driver: 'noop' };
   if (driver === 'pgboss') {
-    const useWorkerUrl = Boolean(env.WORKER_DATABASE_URL);
-    const queueUrl = env.WORKER_DATABASE_URL || rawUrl;
-    if (useWorkerUrl) {
-      // Same checks as the app URL, naming the right variable.
-      try {
-        new URL(queueUrl);
-      } catch {
-        throw new ConfigError('WORKER_DATABASE_URL is not a valid URL');
-      }
-      if (PLACEHOLDER.test(queueUrl)) throw new ConfigError('WORKER_DATABASE_URL looks like a placeholder');
-      if (env.DATABASE_URL && env.DATABASE_URL === queueUrl) {
-        throw new ConfigError('WORKER_DATABASE_URL must differ from the owner DATABASE_URL');
-      }
+    // T-053 (ADR 0039): the API enqueues as its own restricted role. The worker login can read job data, so it is
+    // never accepted here; WORKER_DATABASE_URL belongs to the worker only.
+    if (env.WORKER_DATABASE_URL) {
+      throw new ConfigError('WORKER_DATABASE_URL must not be set for the API: the queue uses APP_DATABASE_URL (enqueue-only)');
     }
+    const queueUrl = rawUrl;
     const schema = env.PGBOSS_SCHEMA || undefined;
     if (schema !== undefined && !/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) {
       throw new ConfigError('PGBOSS_SCHEMA must be a simple lower-case identifier');

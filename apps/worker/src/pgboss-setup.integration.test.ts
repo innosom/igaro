@@ -110,6 +110,36 @@ describe.skipIf(!hasDatabase)('pre-created pg-boss schema, enqueue-only API role
     await setupPgbossSchema({ ownerUrl: url, schema });
   }, 60000);
 
+  it('T-053: setup refuses a schema pre-created by the API role, and one with an API-owned table', async () => {
+    const evil = `pgboss_t053_${tag}`;
+    await admin.query(`GRANT CREATE ON DATABASE "${new URL(url).pathname.slice(1)}" TO igaro_app`);
+    try {
+      await admin.query(`CREATE SCHEMA "${evil}" AUTHORIZATION igaro_app`);
+      await expect(setupPgbossSchema({ ownerUrl: url, schema: evil })).rejects.toThrow(/not the migrator/);
+      await admin.query(`ALTER SCHEMA "${evil}" OWNER TO CURRENT_USER`);
+      await admin.query(`GRANT CREATE ON SCHEMA "${evil}" TO igaro_app`);
+      await admin.query(`CREATE TABLE "${evil}".sneaky (id int)`);
+      await admin.query(`ALTER TABLE "${evil}".sneaky OWNER TO igaro_app`);
+      await expect(setupPgbossSchema({ ownerUrl: url, schema: evil })).rejects.toThrow(/not owned by the migrator/);
+    } finally {
+      await admin.query(`DROP SCHEMA IF EXISTS "${evil}" CASCADE`);
+    }
+  }, 60000);
+
+  it('T-053: the API queue role passes the queue role check; the worker login does not', async () => {
+    const { checkQueueRole } = await import('@igaro/db');
+    expect(await checkQueueRole(apiClient, { schema })).toEqual([]);
+    const w = new pg.Client({ connectionString: urlFor(wLogin, pw) });
+    await w.connect();
+    try {
+      const problems = await checkQueueRole(w, { schema });
+      expect(problems.join(';')).toContain('igaro_worker');
+      expect(problems.join(';')).toContain('SELECT job data');
+    } finally {
+      await w.end();
+    }
+  }, 30000);
+
   it('an external-mode producer fails instead of creating a missing schema', async () => {
     const missing = `pgboss_t051_missing_${tag}`;
     await expect(

@@ -1,4 +1,4 @@
-import { assertRuntimeRole } from '@igaro/db';
+import { assertQueueRole, assertRuntimeRole } from '@igaro/db';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { Db } from './db.js';
@@ -32,6 +32,15 @@ if (config.accountMail.driver === 'pgboss') {
   // Lazy: needs the worker package built (`pnpm --filter @igaro/worker build`; `pnpm -r build` orders it).
   const { connectProducerQueues } = await import('@igaro/worker/producer');
   // One pg-boss connection for both producers (account mail and card render).
+  // T-053 (ADR 0039): the queue login must be enqueue-only (not the worker role, cannot read job data).
+  await assertQueueRole(db.pool, {
+    nodeEnv: config.nodeEnv,
+    schema: config.accountMail.schema,
+    warn: (m) => console.warn(m),
+  });
+  if (config.nodeEnv === 'production' && config.accountMail.schemaMode === 'auto') {
+    console.warn('PGBOSS_SCHEMA_MODE=auto in production: the API role would create and migrate the queue schema');
+  }
   const q = await connectProducerQueues({
     connectionString: config.accountMail.databaseUrl,
     schema: config.accountMail.schema,

@@ -87,6 +87,34 @@ BEGIN
 END
 $do$`;
 
+/**
+ * T-053 (ADR 0039): fail closed unless the schema and every relation in it belong to the connecting owner. A schema
+ * pre-created by a runtime role (igaro_app) would let that role grant itself SELECT on job data. Fail, never ALTER OWNER:
+ * the operator should look at how a runtime role came to own it.
+ */
+export async function assertOwnedByMigrator(client: pg.Client, schema: string, alsoAllowed: string[] = []): Promise<void> {
+  const ns = await client.query<{ owner: string; me: string }>(
+    `SELECT pg_get_userbyid(nspowner) AS owner, current_user::text AS me FROM pg_namespace WHERE nspname = $1`,
+    [schema],
+  );
+  const row = ns.rows[0];
+  if (row && row.owner !== row.me) {
+    throw new Error(`pg-boss setup: schema "${schema}" is owned by "${row.owner}", not the migrator; refusing to continue`);
+  }
+  const rel = await client.query<{ relname: string; owner: string }>(
+    `SELECT c.relname, pg_get_userbyid(c.relowner) AS owner
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+        AND pg_get_userbyid(c.relowner) <> current_user::text
+        AND NOT (pg_get_userbyid(c.relowner) = ANY($2::text[]))`,
+    [schema, alsoAllowed],
+  );
+  if (rel.rows.length > 0) {
+    const names = rel.rows.map((r) => `${r.relname} (${r.owner})`).join(', ');
+    throw new Error(`pg-boss setup: relations in "${schema}" not owned by the migrator: ${names}; refusing to continue`);
+  }
+}
+
 export async function setupPgbossSchema(opts: PgbossSetupOptions): Promise<void> {
   const schema = opts.schema ?? 'pgboss';
   const workerRole = opts.workerRole ?? 'igaro_worker';
@@ -98,6 +126,8 @@ export async function setupPgbossSchema(opts: PgbossSetupOptions): Promise<void>
   await client.connect();
   try {
     // One connection throughout: default privileges apply to objects created by the role that set them.
+    // Worker-created stats partitions are expected (ADR 0038 limit b); anything else not owned by us is refused.
+    await assertOwnedByMigrator(client, schema, [workerRole]);
     for (const stmt of skeletonSql(schema, workerRole, apiRole)) await client.query(stmt);
   } finally {
     await client.end();
@@ -123,6 +153,7 @@ export async function setupPgbossSchema(opts: PgbossSetupOptions): Promise<void>
   const after = new pg.Client({ connectionString: opts.ownerUrl });
   await after.connect();
   try {
+    await assertOwnedByMigrator(after, schema, [workerRole]);
     for (const stmt of grantSql(schema, workerRole, apiRole)) await after.query(stmt);
     await after.query(PARTITION_GRANT(schema, apiRole));
   } finally {
